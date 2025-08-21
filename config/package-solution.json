@@ -32,8 +32,14 @@
         "id": "07632af1-dc2e-4e78-a5ab-5023e5148132",
         "version": "1.0.0.0"
       }
-    ]
-  },
+    ],
+    "webApiPermissionRequests": [
+        { "resource": "Microsoft Graph", "scope": "User.Read" },
+        { "resource": "Microsoft Graph", "scope": "User.ReadBasic.All" },
+        { "resource": "Microsoft Graph", "scope": "User.Read.All" },
+        { "resource": "Microsoft Graph", "scope": "People.Read" }
+      ] 
+    },
   "paths": {
     "zippedPackage": "solution/my-first-webpart.sppkg"
   }

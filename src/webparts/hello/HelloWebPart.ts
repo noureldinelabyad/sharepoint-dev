@@ -28,6 +28,14 @@ export default class HelloWebPart extends BaseClientSideWebPart<IHelloWebPartPro
         <div>${this._environmentMessage}</div>
         <div>Web part property value: <strong>${escape(this.properties.description)}</strong></div>
       </div>
+      <section class="${styles.hello} ${!!this.context.sdks.microsoftTeams ? styles.teams : ''}">
+        <div class="${styles.welcome}">
+          <h2> context cape web part</h2>
+          <div "> Loading fom : <stong> ${escape(this.context.pageContext.web.title)} </div>
+          <div "> description: <stong> ${escape(this.context.pageContext.web.description)} </div>
+          <div "> email : <stong> ${escape(this.context.pageContext.user.email)} </div>
+        </div>
+      </section>
       <div>
         <h3>Welcome to SharePoint Framework!</h3>
         <p>
