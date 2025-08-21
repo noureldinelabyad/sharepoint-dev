@@ -29,7 +29,7 @@ export default class HelloWebPart extends BaseClientSideWebPart<IHelloWebPartPro
         <div>Web part property value: <strong>${escape(this.properties.description)}</strong></div>
       </div>
       <div>
-        <h3>Welcome to SharePoint eeee Framework!</h3>
+        <h3>Welcome to SharePoint Framework!</h3>
         <p>
         The SharePoint Framework (SPFx) is a extensibility model for Microsoft Viva, Microsoft Teams and SharePoint. It's the easiest way to extend Microsoft 365 with automatic Single Sign On, automatic hosting and industry standard tooling.
         </p>
