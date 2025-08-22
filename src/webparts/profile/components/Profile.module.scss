@@ -17,7 +17,7 @@ ul.template--cards {
   background-color: #EDF3F9;
   border-radius: 20px;
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
   gap: 1rem;
 }
 
@@ -43,6 +43,13 @@ ul.template--cards {
   display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem;
   margin: 8px 5px; max-height: 60px; overflow: hidden; position: relative;
 }
+
+/* remove the clamp used on cards */
+.card--skills--full {
+  max-height: none !important;
+  overflow: visible !important;
+}
+
 .skill {
   background: #f5f5f5; color: #444; display: inline-block; padding: 4px 10px; border-radius: 20px;
   border: 1px solid #ccc; font-size: 13px; white-space: nowrap;
@@ -63,6 +70,88 @@ ul.template--cards {
 .card--links { display: flex; flex-wrap: wrap; gap: .5rem; justify-content: center; margin-top: .5rem; }
 .card--email a, .card--link a { font-size: .85rem; color: #0078d4; text-decoration: none; word-break: break-word; }
 .card--email { margin-bottom: .4rem; }
+
+
+/* Modal backdrop + card */
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10000;
+}
+
+.modalCard {
+  background: #fff;
+  border-radius: 16px;
+  max-width: 520px;
+  width: calc(100% - 32px);
+  max-height: 70vh;
+  overflow: hidden;
+  box-shadow: 0 10px 30px rgba(0,0,0,.2);
+  display: flex;
+  flex-direction: column;
+}
+
+.modalHeader {
+  padding: 12px 16px;
+  border-bottom: 1px solid #eee;
+  font-weight: 600;
+}
+
+.modalBody {
+  padding: 12px 16px;
+  overflow: auto;
+}
+
+.modalClose {
+  position: absolute;
+  top: 10px;
+  right: 16px;
+  background: transparent;
+  border: 0;
+  font-size: 20px;
+  cursor: pointer;
+}
+
+/* Button-like link under skills list */
+.showAllBtn {
+  margin-top: 8px;
+  background: none;
+  border: 0;
+  color: #0078d4;
+  text-decoration: underline;
+  cursor: pointer;
+  font: inherit;
+}
+
+.linkBtn {
+  display: inline-block;
+  padding: 6px 10px;
+  border-radius: 999px;
+  background: #f5f8ff;
+  border: 1px solid #d6e3ff;
+  text-decoration: none;
+  font-size: 0.9rem;
+  line-height: 1;
+  color: #1a4fb0;
+  transition: transform .05s ease, background .2s ease, border-color .2s ease;
+}
+.linkBtn:hover {
+  background: #eef4ff;
+  border-color: #c5d8ff;
+  transform: translateY(-1px);
+}
+.linkBtn:active { transform: translateY(0); }
+
+.logo{
+  width:18px;
+   height:auto;
+    vertical-align: middle;
+    margin-right: 6px;
+}
 
 .peopleScroll {
   max-height: 70vh;
