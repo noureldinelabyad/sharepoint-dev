@@ -13,6 +13,52 @@ export default function Profile(props: ProfileProps) {
   const [error, setError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [loadingMore, setLoadingMore] = React.useState(false);
+  
+  const [query, setQuery] = React.useState('');
+
+  // Accent-insensitive, case-insensitive normalize
+const norm = (s?: string) =>
+  (s || '')
+    .toString()
+    .toLowerCase()
+    .normalize('NFD')
+    // strip combining marks (broad unicode-safe)
+    .replace(/[\u0300-\u036f]/g, '');
+
+// does any of the fields match a token?
+function personMatchesTokens(p: Person | Me, tokens: string[]): boolean {
+  if (!tokens.length) return true;
+  const name  = norm(p.displayName);
+  const mail  = norm(p.mail || p.userPrincipalName);
+  const job   = norm(p.jobTitle);
+  const dept  = norm(p.department);
+  const skill = norm((p.skills || []).map(s => s.displayName).join(' '));
+
+  return tokens.every(t =>
+    name.includes(t) ||
+    mail.includes(t) ||
+    job.includes(t) ||
+    dept.includes(t) ||
+    skill.includes(t)
+  );
+}
+
+// highlight matched fragments (optional UX sugar)
+function highlight(text: string, tokens: string[]) {
+  if (!tokens.length) return text;
+  // simple highlight: wrap the first matching token
+  let out = text;
+  for (const t of tokens) {
+    if (!t) continue;
+    const rx = new RegExp(`(${t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'i');
+    if (rx.test(out)) {
+      out = out.replace(rx, '<mark>$1</mark>');
+      break;
+    }
+  }
+  return out;
+}
+  
 
   // ==== Skill sorting helpers (EN + DE, punctuation-safe) ====
 
@@ -27,12 +73,14 @@ export default function Profile(props: ProfileProps) {
     { rank: 1, rx: /\b(junior|beginner|einsteiger|newbie)\b/i },
   ];
 
+
   // Extra: catch patterns like " - Expert", "— Expert", ": Expert"
   const TRAILING_EXPERT = /[\s:\-–—]\s*expert\b/i;
   const TRAILING_ADV    = /[\s:\-–—]\s*(advanced|fortgeschritten)\b/i;
 
   const emailFor = (p: Person | Me) => encodeURIComponent(p.mail || p.userPrincipalName);
 
+  // action links
   const outlookNewMeeting = (p: Person | Me) =>
     `https://outlook.office.com/calendar/deeplink/compose?to=${emailFor(p)}&subject=${encodeURIComponent('Termin mit ' + p.displayName)}`;
 
@@ -86,6 +134,14 @@ export default function Profile(props: ProfileProps) {
     return undefined;
   }
 
+  // use filteredPeople in the render below instead of people
+  const tokens = React.useMemo(() => norm(query).split(/\s+/).filter(Boolean), [query]);
+
+ const filteredPeople = React.useMemo(
+   () => people.filter(p => personMatchesTokens(p, tokens)),
+   [people, tokens]
+ );
+
   // modal state
   const [skillsModal, setSkillsModal] = React.useState<{ name: string; skills: Skill[] } | null>(null);
 
@@ -136,11 +192,12 @@ export default function Profile(props: ProfileProps) {
   React.useEffect(() => { loadFirstPage(); }, [loadFirstPage]);
 
   const onScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (query) return;             // <-- pause while query is not empty
     if (!next || loadingMore) return;
     const el = e.currentTarget;
     const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 200;
     if (nearBottom) loadMore();
-  }, [next, loadingMore, loadMore]);
+  }, [query, next, loadingMore, loadMore]);
 
   // close modal on ESC
   React.useEffect(() => {
@@ -158,7 +215,7 @@ export default function Profile(props: ProfileProps) {
     if (!skills.length) return <span style={{ color: '#777' }}>No skills listed</span>;
 
     const sorted = sortSkillsByLevel(skills);            // sort by strength
-    const visible = skills.slice(0, 12);
+    const visible = sorted.slice(0, 12);
     const hiddenCount = Math.max(0, skills.length - visible.length);
 
     return (
@@ -177,7 +234,7 @@ export default function Profile(props: ProfileProps) {
             onClick={() => setSkillsModal({ name: p.displayName, skills: sorted })}  // pass sorted
             aria-label={`Show all ${skills.length} skills for ${p.displayName}`}
           >
-            Alle anzeigen ({sorted.length})
+            Alle ({sorted.length}) Skills anzeigen 
           </button>
         )}
       </>
@@ -271,11 +328,88 @@ export default function Profile(props: ProfileProps) {
         {Card(me, true)}
       </ul>
 
+      {/* Search box */}
+      <div className={styles.searchBar} aria-label="Personensuche">
+        <div className={styles.searchRow}>
+          <span className={styles.searchIcon}>🔎</span>
+          <input
+            className={styles.searchInput}
+            type="text"
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            placeholder="Suche nach Name, Skill, Jobtitel, Team/Abteilung, E-Mail …"
+            aria-label="Sofortsuche"
+          />
+          {query && (
+            <button className={styles.searchClear} onClick={() => setQuery('')} aria-label="Suche löschen">✕</button>
+          )}
+        </div>
+        <div className={styles.resultsInfo}>
+          {query
+            ? `${filteredPeople.length} Ergebnis(se) für „${query}“`
+            : `${people.length} Personen geladen`}
+        </div>
+     </div>
+
       {/* Org people (scrollable) */}
       <div ref={scrollRef} className={styles.peopleScroll} onScroll={onScroll}>
         <ul className={styles['template--cards']}>
-          {people.map(p => Card(p))}
-          {loadingMore && <li>Loading more…</li>}
+          {filteredPeople.length === 0 && query ? (
+            <li className={styles.noResults}>Keine Treffer. Versuche andere Begriffe.</li>
+          ) : (
+            filteredPeople.map(p => {
+              // show highlighted name/email (optional)
+              const nameHTML = highlight(p.displayName, tokens);
+              const mailHTML = highlight(p.mail || p.userPrincipalName, tokens);
+              return (
+                <li key={p.id} className={styles.card}>
+                  {/* reuse your Card content but replace name/email lines */}
+                  <div className={styles['card--image']}>
+                    <img
+                      src={p.photoUrl ?? 'https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/9.6.1/images/persona/size72.png'}
+                      alt={p.displayName}
+                    />
+                  </div>
+
+                  <div
+                    className={styles['card--name']}
+                    dangerouslySetInnerHTML={{ __html: nameHTML }}
+                  />
+
+                  <div className={styles['card--meta']}>
+                    {p.jobTitle ?? ''}{p.jobTitle && p.department ? ' • ' : ''}{p.department ?? ''}
+                  </div>
+
+                  {/* email */}
+                  <div className={styles['card--email']}>
+                    <a
+                      href={`mailto:${p.mail || p.userPrincipalName}`}
+                      dangerouslySetInnerHTML={{ __html: mailHTML }}
+                    />
+                  </div>
+
+                  {/* action buttons + skills exactly as you already render */}
+                  <div className={styles['card--links']}>
+                    <a className={styles.linkBtn} href={outlookNewMeeting(p)} target="_blank" rel="noopener noreferrer" title={`Termin mit ${p.displayName}`}>
+                      <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_Outlook_(2018%E2%80%93present).svg.png?csf=1&web=1&e=AVZl0q" alt="Outlook" className={styles.logo} />
+                      Termin
+                    </a>
+                    <a className={styles.linkBtn} href={teamsChat(p)} target="_blank" rel="noopener noreferrer" title={`Teams-Chat mit ${p.displayName}`}>
+                      <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_Teams_(2018%E2%80%93present).svg.png?csf=1&web=1&e=bABdsE" alt="Teams" className={styles.logo} />
+                      Chat
+                    </a>
+                    <a className={styles.linkBtn} href={CONSULTANT_PROFILES_URL} target="_blank" rel="noopener noreferrer" title="Berater-Profil">
+                      <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_SharePoint_(2019%E2%80%93present).svg.png?csf=1&web=1&e=etkaPW" alt="SharePoint" className={styles.logo} />
+                      Profil anzeigen
+                    </a>
+                  </div>
+
+                  {renderSkillsCompact(p)}
+                </li>
+              );
+            })
+          )}
+          {loadingMore && !query && <li>Loading more…</li>}
         </ul>
       </div>
 
