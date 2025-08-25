@@ -17,6 +17,7 @@
   background: #fff;
   padding: 8px 12px 0 12px;
   border-radius: 12px;
+  margin: 10px 0 14px;
 }
 
 .searchRow {
@@ -27,25 +28,42 @@
   border-radius: 999px;
   padding: 6px 10px;
   background: #fafafa;
+  gap : .5rem;
 }
 
-.searchIcon { font-size: 16px; opacity: .6; }
+.searchIcon {
+  font-size: 18px;
+  opacity: .6;
+  line-height: .5rem; 
+}
+
 .searchInput {
   flex: 1;
-  border: 0;
+  padding: 8px 10px;
   outline: none;
   background: transparent;
   font-size: 14px;
+
+  border: 0 !important;
+  outline: none !important;
+  box-shadow: none !important;
+ 
 }
+
+.searchInput:focus {
+  border-color: #8aa9ff;
+  box-shadow: 0 0 0 2px rgba(138,169,255,.2);
+}
+
 .searchClear {
-  background: none; border: 0; cursor: pointer; font-size: 14px; opacity: .6;
+  background: none; border: 0; cursor: pointer; font-size: 14px; opacity: .6; color: #666; padding: 2px 6px;
 }
 .resultsInfo {
   margin: 6px 2px 10px 2px;
-  font-size: 12px; color: #666;
+  font-size: .9rem; color: #666;
 }
 .noResults {
-  text-align: center; color: #666; padding: 16px 0;
+  text-align: center; color: #666; padding: 16px 8px;
 }
 mark {
   background: #fff2a8;

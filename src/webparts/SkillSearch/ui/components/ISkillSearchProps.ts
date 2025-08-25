@@ -1,4 +1,4 @@
-export interface IProfileProps {
+export interface ISkillSearchProps {
   description: string;
   isDarkTheme: boolean;
   environmentMessage: string;

@@ -8,21 +8,21 @@ import {
 import { BaseClientSideWebPart } from '@microsoft/sp-webpart-base';
 import { IReadonlyTheme } from '@microsoft/sp-component-base';
 
-import * as strings from 'ProfileWebPartStrings';
-import Profile from './components/Profile';
-//import { IProfileProps } from './components/IProfileProps';
+import * as strings from 'SkillSearchWebPartStrings';
+import SkillSearch from './SkillSearch';
+//import { ISkillSearchProps } from './components/ISkillSearchProps';
 
-export interface IProfileWebPartProps {
+export interface ISkillSearchWebPartProps {
   description: string;
 }
 
-export default class ProfileWebPart extends BaseClientSideWebPart<IProfileWebPartProps> {
+export default class SkillSearchWebPart extends BaseClientSideWebPart<ISkillSearchWebPartProps> {
 
   // private _isDarkTheme: boolean = false;
  // private _environmentMessage: string = '';
 
   public render(): void {
-    const element = React.createElement(Profile, { context: this.context });
+    const element = React.createElement(SkillSearch, { context: this.context });
     ReactDom.render(element, this.domElement);
   }
 

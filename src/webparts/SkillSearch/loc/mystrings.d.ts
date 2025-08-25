@@ -1,4 +1,4 @@
-declare interface IHelloWebPartStrings {
+declare interface SkillSearchWebPartStrings {
   PropertyPaneDescription: string;
   BasicGroupName: string;
   DescriptionFieldLabel: string;
@@ -13,7 +13,7 @@ declare interface IHelloWebPartStrings {
   UnknownEnvironment: string;
 }
 
-declare module 'HelloWebPartStrings' {
-  const strings: IHelloWebPartStrings;
+declare module 'SkillSearchWebPartStrings' {
+  const strings: ISkillSearchWebPartStrings;
   export = strings;
 }

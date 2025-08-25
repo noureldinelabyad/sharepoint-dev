@@ -1,0 +1,94 @@
+import * as React from "react";
+import styles from "./SkillSearch.module.scss";
+import { WebPartContext } from "@microsoft/sp-webpart-base";
+import { Me, Person, Skill } from "./services/models";
+import { usePeople } from "./ui";
+import { HeroMeCard, PersonCard, SearchBar, SkillsModal } from "./ui";
+import { tokenize } from "./utils/search";
+
+export interface SkillSearchProps { context: WebPartContext; }
+
+const CONSULTANT_PROFILES_URL =
+  "https://thinformatics.sharepoint.com/sites/Beraterprofile/Freigegebene%20Dokumente/Forms/AllItems.aspx?as=json";
+
+const emailFor = (p: Person | Me) => encodeURIComponent(p.mail || p.userPrincipalName);
+const outlookNewMeeting = (p: Person | Me) =>
+  `https://outlook.office.com/calendar/deeplink/compose?to=${emailFor(p)}&subject=${encodeURIComponent("Termin mit " + p.displayName)}`;
+const teamsChat = (p: Person | Me) =>
+  `https://teams.microsoft.com/l/chat/0/0?users=${emailFor(p)}`;
+
+export default function SkillSearch({ context }: SkillSearchProps) {
+  const { me, people, next, loading, loadingMore, error, loadFirst, loadMore } = usePeople(context.msGraphClientFactory);
+
+  const [query, setQuery] = React.useState("");
+  const [skillsModal, setSkillsModal] = React.useState<{ name: string; skills: Skill[] } | null>(null);
+
+  React.useEffect(() => { loadFirst(); }, [loadFirst]);
+
+  const tokens = React.useMemo(() => tokenize(query), [query]);
+  const filtered = React.useMemo(
+    () => people.filter(p => {
+      // quick inline match to avoid importing utils again
+      const t = tokens;
+      if (!t.length) return true;
+      const name  = (p.displayName || "").toLowerCase();
+      const mail  = (p.mail || p.userPrincipalName || "").toLowerCase();
+      const job   = (p.jobTitle || "").toLowerCase();
+      const dept  = (p.department || "").toLowerCase();
+      const skill = (p.skills || []).map(s => s.displayName.toLowerCase()).join(" ");
+      return t.every(x => name.includes(x) || mail.includes(x) || job.includes(x) || dept.includes(x) || skill.includes(x));
+    }),
+    [people, tokens]
+  );
+
+  const onScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
+    if (query) return;            // pause infinite scroll while searching
+    if (!next || loadingMore) return;
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) loadMore();
+  }, [query, next, loadingMore, loadMore]);
+
+  if (loading) return <div>Loading profile…</div>;
+  if (error) return <div style={{ color: "#a80000" }}>Error: {error}</div>;
+  if (!me) return <div>No profile data.</div>;
+
+  return (
+    <>
+      <HeroMeCard me={me} onOpenSkills={(name, skills) => setSkillsModal({ name, skills })} />
+
+      <SearchBar
+        query={query}
+        onChange={setQuery}
+        summary={query ? `${filtered.length} Ergebnis(se) für „${query}“` : `${people.length} Personen geladen`}
+      />
+
+      <div className={styles.peopleScroll} onScroll={onScroll}>
+        <ul className={styles["template--cards"]}>
+          {filtered.length === 0 && query && (
+            <li className={styles.noResults}>Keine Treffer. Versuche andere Begriffe.</li>
+          )}
+          {filtered.map(p => (
+            <PersonCard
+              key={p.id}
+              person={p}
+              tokens={tokens}
+              onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
+              outlookUrl={outlookNewMeeting}
+              teamsUrl={teamsChat}
+              profilesUrl={CONSULTANT_PROFILES_URL}
+            />
+          ))}
+          {loadingMore && !query && <li>Loading more…</li>}
+        </ul>
+      </div>
+
+      {skillsModal && (
+        <SkillsModal
+          name={skillsModal.name}
+          skills={skillsModal.skills}
+          onClose={() => setSkillsModal(null)}
+        />
+      )}
+    </>
+  );
+}

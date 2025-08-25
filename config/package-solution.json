@@ -16,10 +16,10 @@
     },
     "metadata": {
       "shortDescription": {
-        "default": "MyFirstWebpart description"
+        "default": "SkillSearchWebPart description"
       },
       "longDescription": {
-        "default": "MyFirstWebpart description"
+        "default": "SkillSearchWebPart description"
       },
       "screenshotPaths": [],
       "videoUrl": "",
@@ -27,8 +27,8 @@
     },
     "features": [
       {
-        "title": "my-first-webpart Feature",
-        "description": "The feature that activates elements of the my-first-webpart solution.",
+        "title": "SkillSearchWebPart Feature",
+        "description": "The feature that activates elements of the SkillSearchWebPart solution.",
         "id": "07632af1-dc2e-4e78-a5ab-5023e5148132",
         "version": "1.0.0.0"
       }

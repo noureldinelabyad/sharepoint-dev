@@ -2,26 +2,17 @@
   "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/config.2.0.schema.json",
   "version": "2.0",
   "bundles": {
-    "hello-web-part": {
-      "components": [
-        {
-          "entrypoint": "./lib/webparts/hello/HelloWebPart.js",
-          "manifest": "./src/webparts/hello/HelloWebPart.manifest.json"
-        }
-      ]
-    },
     "profile-web-part": {
       "components": [
         {
-          "entrypoint": "./lib/webparts/profile/ProfileWebPart.js",
-          "manifest": "./src/webparts/profile/ProfileWebPart.manifest.json"
+          "entrypoint": "./lib/webparts/SkillSearch/SkillSearchWebPart.js",
+          "manifest": "./src/webparts/SkillSearch/SkillSearchWebPart.manifest.json"
         }
       ]
     }
   },
   "externals": {},
   "localizedResources": {
-    "HelloWebPartStrings": "lib/webparts/hello/loc/{locale}.js",
-    "ProfileWebPartStrings": "lib/webparts/profile/loc/{locale}.js"
+    "SkillSearchWebPartStrings": "lib/webparts/SkillSearch/loc/{locale}.js"
   }
 }
