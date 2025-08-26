@@ -18,7 +18,19 @@ const teamsChat = (p: Person | Me) =>
   `https://teams.microsoft.com/l/chat/0/0?users=${emailFor(p)}`;
 
 export default function SkillSearch({ context }: SkillSearchProps) {
-  const { me, people, next, loading, loadingMore, error, loadFirst, loadMore } = usePeople(context.msGraphClientFactory);
+  const {
+    me,
+    people,            // paged list for browsing
+    allPeople,         // full index (prefetched)
+    next,
+    loading,
+    loadingMore,
+    bulkLoading,
+    fullyLoaded,
+    error,
+    loadFirst,
+    loadMore
+  } = usePeople(context.msGraphClientFactory);
 
   const [query, setQuery] = React.useState("");
   const [skillsModal, setSkillsModal] = React.useState<{ name: string; skills: Skill[] } | null>(null);
@@ -26,23 +38,25 @@ export default function SkillSearch({ context }: SkillSearchProps) {
   React.useEffect(() => { loadFirst(); }, [loadFirst]);
 
   const tokens = React.useMemo(() => tokenize(query), [query]);
+
+  // Use full index for search; fall back to paged list when query is empty
+  const dataSet = query ? allPeople : people;
+
   const filtered = React.useMemo(
-    () => people.filter(p => {
-      // quick inline match to avoid importing utils again
-      const t = tokens;
-      if (!t.length) return true;
+    () => dataSet.filter(p => {
+      if (!tokens.length) return true;
       const name  = (p.displayName || "").toLowerCase();
       const mail  = (p.mail || p.userPrincipalName || "").toLowerCase();
       const job   = (p.jobTitle || "").toLowerCase();
       const dept  = (p.department || "").toLowerCase();
       const skill = (p.skills || []).map(s => s.displayName.toLowerCase()).join(" ");
-      return t.every(x => name.includes(x) || mail.includes(x) || job.includes(x) || dept.includes(x) || skill.includes(x));
+      return tokens.every(x => name.includes(x) || mail.includes(x) || job.includes(x) || dept.includes(x) || skill.includes(x));
     }),
-    [people, tokens]
+    [dataSet, tokens]
   );
 
   const onScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
-    if (query) return;            // pause infinite scroll while searching
+    if (query) return;            // pause infinite scroll while searching (we show from allPeople)
     if (!next || loadingMore) return;
     const el = e.currentTarget;
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) loadMore();
@@ -52,6 +66,13 @@ export default function SkillSearch({ context }: SkillSearchProps) {
   if (error) return <div style={{ color: "#a80000" }}>Error: {error}</div>;
   if (!me) return <div>No profile data.</div>;
 
+  const mayHaveMore = !!next || (bulkLoading && !fullyLoaded);
+
+  const summary =
+    query
+     ? `${filtered.length} Ergebnis(se) für „${query}“${mayHaveMore ? " – weitere Personen werden geladen…" : ""}`
+     : `${people.length}${mayHaveMore ? " +" : ""} Personen geladen${bulkLoading ? " …" : ""}`;
+
   return (
     <>
       <HeroMeCard me={me} onOpenSkills={(name, skills) => setSkillsModal({ name, skills })} />
@@ -59,7 +80,7 @@ export default function SkillSearch({ context }: SkillSearchProps) {
       <SearchBar
         query={query}
         onChange={setQuery}
-        summary={query ? `${filtered.length} Ergebnis(se) für „${query}“` : `${people.length} Personen geladen`}
+        summary={summary}
       />
 
       <div className={styles.peopleScroll} onScroll={onScroll}>
@@ -67,6 +88,7 @@ export default function SkillSearch({ context }: SkillSearchProps) {
           {filtered.length === 0 && query && (
             <li className={styles.noResults}>Keine Treffer. Versuche andere Begriffe.</li>
           )}
+
           {filtered.map(p => (
             <PersonCard
               key={p.id}
@@ -78,6 +100,7 @@ export default function SkillSearch({ context }: SkillSearchProps) {
               profilesUrl={CONSULTANT_PROFILES_URL}
             />
           ))}
+
           {loadingMore && !query && <li>Loading more…</li>}
         </ul>
       </div>

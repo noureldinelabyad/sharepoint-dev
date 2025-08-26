@@ -2,7 +2,7 @@
 
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { PeopleResult, Person } from './models';
-import { SERVICE_LIKE_DENY } from './constants';
+import { SERVICE_LIKE_DENY, ALLOWED_EMAIL_RX } from './constants';
 
 /**
  * Repository for directory user reads.
@@ -14,8 +14,11 @@ export class UsersRepository {
   /**
    * Get a page of active human users (Members/Guests) with licenses.
    * Returns a PeopleResult with items + nextLink for paging.
+   *
+   * NOTE: The assignedLicenses/$count filter uses "ne 0" (or "gt 0" depending on tenant).
+   * We use "ne 0" to avoid the "Operator: 'Greater' is not supported" error seen on some tenants.
    */
-  async getActiveUsersPage(pageSize = 20, next?: string): Promise<PeopleResult> {
+  async getActiveUsersPage(pageSize = 500, next?: string): Promise<PeopleResult> {
     if (next) {
       const path = next.replace('https://graph.microsoft.com/v1.0', '');
       const res = await this.client.api(path).get();
@@ -29,7 +32,8 @@ export class UsersRepository {
       .header('ConsistencyLevel', 'eventual')
       .count(true)
       .select('id,displayName,jobTitle,department,mail,otherMails,userPrincipalName,accountEnabled,userType,assignedLicenses')
-      .filter("accountEnabled eq true and (userType eq 'Member' or userType eq 'Guest') and assignedLicenses/$count gt 0")
+      .filter("accountEnabled eq true and (userType eq 'Member' or userType eq 'Guest') and assignedLicenses/$count ne 0"+
+       "and (endswith(mail,'@thinformatics.com') or endswith(userPrincipalName,'@thinformatics.com'))")
       .orderby('displayName')
       .top(pageSize)
       .get();
@@ -43,16 +47,16 @@ export class UsersRepository {
    * Fallback when directory-list permissions aren’t approved:
    * Returns a relevant “people” list for the current user.
    */
-  async getRelevantPeople(pageSize = 20): Promise<PeopleResult> {
+  async getRelevantPeople(pageSize = 500): Promise<PeopleResult> {
     const res = await this.client.api('/me/people')
       .select('id,displayName,userPrincipalName,jobTitle,department,scoredEmailAddresses')
       .top(pageSize)
       .get();
 
     const primaryEmail = (p: any): string | undefined =>
-    p?.scoredEmailAddresses?.[0]?.address
-    ?? p?.emailAddresses?.[0]?.address
-    ?? p?.userPrincipalName;
+      p?.scoredEmailAddresses?.[0]?.address
+      ?? p?.emailAddresses?.[0]?.address
+      ?? p?.userPrincipalName;
 
     let people: Person[] = (res.value as any[]).map((p) => ({
       id: p.id,
@@ -75,7 +79,7 @@ export class UsersRepository {
     displayName: u.displayName,
     jobTitle: u.jobTitle,
     department: u.department,
-    mail: u.mail || (Array.isArray(u.otherMails) ? u.otherMails[0] : undefined) || u.userPrincipalName,
+    mail: this.pickPreferredEmail(u),
     userPrincipalName: u.userPrincipalName,
     photoUrl: undefined,
     skills: []
@@ -85,7 +89,26 @@ export class UsersRepository {
   private filterServiceLike(users: Person[]): Person[] {
     return users.filter(u =>
       u.displayName && !SERVICE_LIKE_DENY.test(u.displayName) &&
-      u.userPrincipalName && !SERVICE_LIKE_DENY.test(u.userPrincipalName)
+      u.userPrincipalName && !SERVICE_LIKE_DENY.test(u.userPrincipalName) &&
+      this.hasAllowedDomain(u)
     );
   }
+
+  private pickPreferredEmail(u: any): string | undefined {
+  const candidates: string[] = [
+    u?.mail,
+    ...(Array.isArray(u?.otherMails) ? u.otherMails : []),
+    u?.userPrincipalName
+  ].filter(Boolean);
+  // Prefer company domain; otherwise fall back to first available
+  const preferred = candidates.find(e => ALLOWED_EMAIL_RX.test(e));
+  return preferred ?? candidates[0];
+}
+
+private hasAllowedDomain(p: { mail?: string; userPrincipalName: string }): boolean {
+  const e = p.mail ?? p.userPrincipalName;
+  return !!e && ALLOWED_EMAIL_RX.test(e);
+}
+
+
 }

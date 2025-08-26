@@ -22,6 +22,6 @@ export const SearchBar: React.FC<Props> = ({ query, onChange, summary }) => (
         <button className={styles.searchClear} onClick={() => onChange("")} aria-label="Suche löschen">✕</button>
       )}
     </div>
-    <div className={styles.resultsInfo}>{summary}</div>
+    {summary && <div className={styles.resultsInfo}>{summary}</div>}
   </div>
 );

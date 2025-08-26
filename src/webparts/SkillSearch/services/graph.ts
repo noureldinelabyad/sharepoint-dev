@@ -33,7 +33,7 @@ export class GraphFacade {
   }
 
   /** Page over active human users; enrich with photos & skills. */
-  public async getPeoplePage(pageSize = 20, next?: string): Promise<PeopleResult> {
+  public async getPeoplePage(pageSize = 500, next?: string): Promise<PeopleResult> {
     const res = await this.usersRepo.getActiveUsersPage(pageSize, next);
     await this.photos.enrich(res.items);
     await this.skills.enrich(res.items);
@@ -41,7 +41,7 @@ export class GraphFacade {
   }
 
   /** Fallback list when directory read isn’t consented. */
-  public async getPeopleFallback(pageSize = 20): Promise<PeopleResult> {
+  public async getPeopleFallback(pageSize = 500): Promise<PeopleResult> {
     const res = await this.usersRepo.getRelevantPeople(pageSize);
     await this.photos.enrich(res.items);
     await this.skills.enrich(res.items);

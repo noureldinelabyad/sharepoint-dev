@@ -1,14 +1,14 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/spfx-build/package-solution.schema.json",
   "solution": {
-    "name": "my-first-webpart-client-side-solution",
+    "name": "skillSearch-webpart-solution",
     "id": "5acd79a1-3547-4122-88cc-313462b802ed",
     "version": "1.0.0.0",
     "includeClientSideAssets": true,
     "skipFeatureDeployment": true,
     "isDomainIsolated": false,
     "developer": {
-      "name": "",
+      "name": "Noureldin Elabyad",
       "websiteUrl": "",
       "privacyUrl": "",
       "termsOfUseUrl": "",
@@ -41,6 +41,6 @@
       ] 
     },
   "paths": {
-    "zippedPackage": "solution/my-first-webpart.sppkg"
+    "zippedPackage": "solution/skillSearch-webpart.sppkg"
   }
 }
