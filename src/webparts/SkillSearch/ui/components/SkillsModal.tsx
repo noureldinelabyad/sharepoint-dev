@@ -25,7 +25,7 @@ export const SkillsModal: React.FC<Props> = ({ name, skills, onClose }) => {
           <button className={styles.modalClose} onClick={onClose} aria-label="Close">×</button>
         </div>
         <div className={styles.modalBody}>
-          <div className={`${styles["card--skills"]} ${styles["card--skills--full"]}`}>
+          <div className={`${styles["cardSkills"]} ${styles["cardSkills--full"]}`}>
             {sorted.map((s, i) => (
               <span key={i} className={styles.skill}>
                 {s.displayName}{effectiveProficiency(s) ? ` • ${effectiveProficiency(s)}` : ""}

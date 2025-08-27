@@ -18,28 +18,28 @@ export const PersonCard: React.FC<Props> = ({ person, tokens, onOpenSkills, outl
 
   return (
     <li className={styles.card}>
-      <div className={styles["card--image"]}>
+      <div className={styles["cardImage"]}>
         <img
           src={person.photoUrl ?? "https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/9.6.1/images/persona/size72.png"}
           alt={person.displayName}
         />
       </div>
 
-      <div className={styles["card--name"]}>
+      <div className={styles["cardName"]}>
         {highlightToNodes(person.displayName, tokens)}
       </div>
 
-      <div className={styles["card--meta"]}>
+      <div className={styles["cardMeta"]}>
         {person.jobTitle ?? ""}{person.jobTitle && person.department ? " • " : ""}{person.department ?? ""}
       </div>
 
-      <div className={styles["card--email"]}>
+      <div className={styles["cardEmail"]}>
         <a href={`mailto:${person.mail || person.userPrincipalName}`}>
           {highlightToNodes(person.mail || person.userPrincipalName, tokens)}
         </a>
       </div>
 
-      <div className={styles["card--links"]}>
+      <div className={styles["cardLinks"]}>
         <a className={styles.linkBtn} href={outlookUrl(person)} target="_blank" rel="noopener noreferrer" title={`Termin mit ${person.displayName}`}>
           <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_Outlook_(2018%E2%80%93present).svg.png?csf=1&web=1&e=AVZl0q" alt="" className={styles.logo} />
           Termin
@@ -54,7 +54,7 @@ export const PersonCard: React.FC<Props> = ({ person, tokens, onOpenSkills, outl
         </a>
       </div>
 
-      <div className={styles["card--skills"]}>
+      <div className={styles["cardSkills"]}>
         {visible.map((s, i) => (
           <span key={i} className={styles.skill}>
             {s.displayName}{effectiveProficiency(s) ? ` • ${effectiveProficiency(s)}` : ""}

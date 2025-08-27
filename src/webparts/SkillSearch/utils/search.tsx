@@ -4,7 +4,7 @@ import { Me, Person } from "../services/models";
 export const norm = (s?: string) =>
   (s || "").toString().toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-export const tokenize = (q: string) => norm(q).split(/\s+/).filter(Boolean);
+export const tokenize = (q: string) : string[] => norm(q).split(/\s+/).filter(Boolean);
 
 export function matches(p: Person | Me, tokens: string[]): boolean {
   if (!tokens.length) return true;

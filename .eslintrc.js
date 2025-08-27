@@ -124,7 +124,15 @@ module.exports = {
         '@typescript-eslint/no-inferrable-types': 0,
         // STANDARDIZED BY:   @typescript-eslint\eslint-plugin\dist\configs\recommended.json
         // Rationale to disable: declaration of empty interfaces may be helpful for generic types scenarios
+        // disable noisy rules:
         '@typescript-eslint/no-empty-interface': 0,
+        '@typescript-eslint/no-empty-interface': 0,
+        '@typescript-eslint/explicit-function-return-type': 'off',
+        '@typescript-eslint/no-explicit-any': 'warn',
+        '@typescript-eslint/no-floating-promises': ['error', { ignoreVoid: true }],
+        'require-atomic-updates': 'off',
+        '@rushstack/security/no-unsafe-regexp': 'warn',
+        // ====================================================================
         // RATIONALE:         This rule warns if setters are defined without getters, which is probably a mistake.
         'accessor-pairs': 1,
         // RATIONALE:         In TypeScript, if you write x["y"] instead of x.y, it disables type checking.
@@ -291,6 +299,8 @@ module.exports = {
         '@microsoft/spfx/import-requires-chunk-name': 1,
         '@microsoft/spfx/no-require-ensure': 2,
         '@microsoft/spfx/pair-react-dom-render-unmount': 1
+
+
       }
     },
     {

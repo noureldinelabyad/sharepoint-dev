@@ -11,13 +11,14 @@ export interface SkillSearchProps { context: WebPartContext; }
 const CONSULTANT_PROFILES_URL =
   "https://thinformatics.sharepoint.com/sites/Beraterprofile/Freigegebene%20Dokumente/Forms/AllItems.aspx?as=json";
 
-const emailFor = (p: Person | Me) => encodeURIComponent(p.mail || p.userPrincipalName);
+const emailFor = (p: Person | Me) =>
+  encodeURIComponent(p.mail || p.userPrincipalName);
 const outlookNewMeeting = (p: Person | Me) =>
   `https://outlook.office.com/calendar/deeplink/compose?to=${emailFor(p)}&subject=${encodeURIComponent("Termin mit " + p.displayName)}`;
 const teamsChat = (p: Person | Me) =>
   `https://teams.microsoft.com/l/chat/0/0?users=${emailFor(p)}`;
 
-export default function SkillSearch({ context }: SkillSearchProps) {
+export default function SkillSearch({ context }: SkillSearchProps) : JSX.Element {
   const {
     me,
     people,            // paged list for browsing
@@ -55,11 +56,13 @@ export default function SkillSearch({ context }: SkillSearchProps) {
     [dataSet, tokens]
   );
 
-  const onScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) => {
+  const onScroll = React.useCallback((e: React.UIEvent<HTMLDivElement>) : void => {
     if (query) return;            // pause infinite scroll while searching (we show from allPeople)
     if (!next || loadingMore) return;
     const el = e.currentTarget;
-    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) loadMore();
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) {
+      void loadMore();
+    }
   }, [query, next, loadingMore, loadMore]);
 
   if (loading) return <div>Loading profile…</div>;
@@ -84,7 +87,7 @@ export default function SkillSearch({ context }: SkillSearchProps) {
       />
 
       <div className={styles.peopleScroll} onScroll={onScroll}>
-        <ul className={styles["template--cards"]}>
+        <ul className={styles["templateCards"]}>
           {filtered.length === 0 && query && (
             <li className={styles.noResults}>Keine Treffer. Versuche andere Begriffe.</li>
           )}

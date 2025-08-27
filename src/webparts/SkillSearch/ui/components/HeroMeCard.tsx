@@ -11,20 +11,20 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills }) => {
   const skills = sortSkillsByLevel(me.skills || []);
   const visible = skills.slice(0, 12);
   return (
-    <ul className={styles["template--cards"]} style={{ background: "#fff", gridTemplateColumns: "1fr" }}>
+    <ul className={styles["templateCards"]} style={{ background: "#fff", gridTemplateColumns: "1fr" }}>
       <li className={styles.card}>
-        <div className={styles["card--image"]}>
+        <div className={styles["cardImage"]}>
           <img src={me.photoUrl ?? "https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/9.6.1/images/persona/size72.png"} alt={me.displayName} />
         </div>
-        <div className={styles["card--name"]}>{me.displayName}</div>
-        <div className={styles["card--meta"]}>
+        <div className={styles["cardName"]}>{me.displayName}</div>
+        <div className={styles["cardMeta"]}>
           {me.jobTitle ?? ""}{me.jobTitle && me.department ? " • " : ""}{me.department ?? ""}
         </div>
         {me.aboutMe && <div style={{ marginBottom: 8, color: "#333" }}>{me.aboutMe}</div>}
         {me.responsibilities?.length ? (
           <div style={{ marginBottom: 8 }}><strong>Ask me about:</strong> {me.responsibilities.slice(0, 6).join(", ")}</div>
         ) : null}
-        <div className={styles["card--skills"]}>
+        <div className={styles["cardSkills"]}>
           {visible.map((s, i) => (
             <span key={i} className={styles.skill}>
               {s.displayName}{effectiveProficiency(s) ? ` • ${effectiveProficiency(s)}` : ""}
@@ -37,7 +37,7 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills }) => {
           </button>
         )}
         {/* email */}
-        <div className={styles["card--email"]}>
+        <div className={styles["cardEmail"]}>
           <a href={`mailto:${me.mail || me.userPrincipalName}`}>{me.mail || me.userPrincipalName}</a>
         </div>
       </li>
