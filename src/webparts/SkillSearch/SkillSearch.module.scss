@@ -67,8 +67,9 @@
 }
 mark {
   background: #fff2a8;
-  padding: 0 2px;
-  border-radius: 3px;
+  color: #1a8cff;
+  //padding: 0 0px;
+  //border-radius: 3px;
 }
 
 ul.templateCards {
@@ -101,8 +102,20 @@ ul.templateCards {
 .cardName { font-size: 1.1rem; font-weight: 600; margin-bottom: .3rem; color: #333; }
 
 .cardSkills {
-  display: flex; flex-wrap: wrap; justify-content: center; gap: .4rem;
-  margin: 8px 5px; max-height: 60px; overflow: hidden; position: relative;
+  --chip-h: 30px;
+  --chip-gap: 8px;
+  --max-rows: 2;
+
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: calc(var(--chip-gap) * 0.5);
+  margin: 8px 5px;
+
+ /* the clamp — this is what i detect in TS */
+  max-height: calc(var(--max-rows) * (var(--chip-h) + var(--chip-gap)));
+  overflow: hidden;
+  position: relative;
 }
 
 /* remove the clamp used on cards */
@@ -112,8 +125,17 @@ ul.templateCards {
 }
 
 .skill {
-  background: #f5f5f5; color: #444; display: inline-block; padding: 4px 10px; border-radius: 20px;
-  border: 1px solid #ccc; font-size: 13px; white-space: nowrap;
+  background: #f5f5f5;
+  color: #444;
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 20px;
+  border: 1px solid #ccc;
+  font-size: 13px;
+
+  white-space: normal;
+  word-break: break-word;
+  line-height: var(--chip-h);
 }
 
 
@@ -146,6 +168,10 @@ ul.templateCards {
   flex-direction: column;
 }
 
+/* hero card skills: no clamp */
+.hero .cardSkills { max-height: none; overflow: visible; }
+
+
 .modalHeader {
   padding: 12px 16px;
   border-bottom: 1px solid #eee;
@@ -169,7 +195,8 @@ ul.templateCards {
 
 /* Button-like link under skills list */
 .showAllBtn {
-  margin-top: 8px;
+  margin-top: 3px;
+  margin-bottom: 3px;
   background: none;
   border: 0;
   color: #0078d4;

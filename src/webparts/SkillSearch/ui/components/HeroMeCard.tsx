@@ -9,7 +9,7 @@ type Props = {
 };
 export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills }) => {
   const skills = sortSkillsByLevel(me.skills || []);
-  const visible = skills.slice(0, 12);
+  const visible = skills.slice(0, 5);
   return (
     <ul className={styles["templateCards"]} style={{ background: "#fff", gridTemplateColumns: "1fr" }}>
       <li className={styles.card}>
@@ -24,6 +24,10 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills }) => {
         {me.responsibilities?.length ? (
           <div style={{ marginBottom: 8 }}><strong>Ask me about:</strong> {me.responsibilities.slice(0, 6).join(", ")}</div>
         ) : null}
+        {/* email */}
+        <div className={styles["cardEmail"]}>
+          <a href={`mailto:${me.mail || me.userPrincipalName}`}>{me.mail || me.userPrincipalName}</a>
+        </div>
         <div className={styles["cardSkills"]}>
           {visible.map((s, i) => (
             <span key={i} className={styles.skill}>
@@ -36,10 +40,6 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills }) => {
             Alle ({skills.length}) Skills anzeigen
           </button>
         )}
-        {/* email */}
-        <div className={styles["cardEmail"]}>
-          <a href={`mailto:${me.mail || me.userPrincipalName}`}>{me.mail || me.userPrincipalName}</a>
-        </div>
       </li>
     </ul>
   );

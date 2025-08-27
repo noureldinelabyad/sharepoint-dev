@@ -1,58 +1,87 @@
-// Skills enrichment (v1.0 + beta fallback)
+// Skills enrichment (v1.0 + beta merge; de-dupe; Graph $batch safe)
 
 import { MSGraphClientV3 } from '@microsoft/sp-http';
+import { Person, Skill } from './models';
 import { BATCH_SIZE } from './constants';
 import { chunk } from './utils';
-import { Person } from './models';
+
+// ---------- Graph response types ----------
+
+interface V1BatchItem {
+  id: string;
+  status: number;
+  body?: { skills?: (string | null | undefined)[] };
+}
+
+interface GraphProfileSkill {
+  displayName?: string | null;
+  proficiency?: string | null;
+}
+
+interface BetaBatchItem {
+  id: string;
+  status: number;
+  body?: { value?: GraphProfileSkill[] };
+}
+
+type BetaSkill = { displayName: string; proficiency?: string };
+
+// Graph enforces max 20 requests per $batch
+const GRAPH_BATCH_LIMIT = 20;
+const EFFECTIVE_BATCH = Math.min(
+  typeof BATCH_SIZE === 'number' && BATCH_SIZE > 0 ? BATCH_SIZE : GRAPH_BATCH_LIMIT,
+  GRAPH_BATCH_LIMIT
+);
 
 /**
- * Enriches Person[].skills using a hybrid strategy:
- * 1) v1.0 /users/{key}?$select=skills (string[])
- * 2) beta /users/{id}/profile/skills (displayName, proficiency) for empties
+ * Strategy
+ * 1) v1.0  /users/{key}?$select=skills               -> string[]
+ * 2) beta  /users/{id}/profile/skills?$select=...    -> {displayName, proficiency}
+ *    Merge beta into v1 results (never overwrite existing names, only enrich).
  */
 export class SkillsService {
   constructor(private client: MSGraphClientV3) {}
 
-  async enrich(users: Person[]): Promise<void> {
-    if (!users.length) return;
+  public async enrich(users: Person[]): Promise<void> {
+    if (!users?.length) return;
 
-    // Phase 1 — v1.0 user.skills (strings)
-    const groups = chunk(users, BATCH_SIZE);
-    const indexesNeedingBeta: number[] = [];
+    // ----- Pass 1 — v1.0 user.skills (strings) -----
+    const v1Groups = chunk(users, EFFECTIVE_BATCH);
+    for (let g = 0; g < v1Groups.length; g++) {
+      const group = v1Groups[g];
+      const base = g * EFFECTIVE_BATCH;
 
-    for (let g = 0; g < groups.length; g++) {
-      const group = groups[g];
       const req = {
         requests: group.map((u, i) => {
-          const globalIdx = g * BATCH_SIZE + i;
+          const idx = base + i;
           const key = encodeURIComponent(u.userPrincipalName || u.id);
-          return { id: String(globalIdx), method: 'GET', url: `/users/${key}?$select=skills` };
+          return { id: String(idx), method: 'GET', url: `/users/${key}?$select=skills` };
         })
       };
 
       try {
         const res = await this.client.api('/$batch').version('v1.0').post(req);
-        if (res?.responses) {
-          res.responses.forEach((r: any) => {
-            const idx = parseInt(r.id, 10);
-            if (r.status === 200 && Array.isArray(r.body?.skills) && r.body.skills.length) {
-              users[idx].skills = r.body.skills.map((s: string) => ({ displayName: s }));
-            } else {
-              indexesNeedingBeta.push(idx);
-            }
-          });
+        const responses = Array.isArray(res?.responses) ? (res.responses as V1BatchItem[]) : [];
+        for (const r of responses) {
+          const idx = Number.parseInt(String(r.id), 10);
+          if (!Number.isFinite(idx) || r.status !== 200) continue;
+
+          const raw = r.body?.skills ?? [];
+          const names: string[] = raw
+            .map(s => (s ?? '').toString().trim())
+            .filter(s => s.length > 0);
+
+          if (names.length) this.mergeV1(users[idx], names);
         }
       } catch {
-        // if the batch failed, mark entire group for beta
-        for (let i = 0; i < group.length; i++) indexesNeedingBeta.push(g * BATCH_SIZE + i);
+        // ignore; beta pass may still populate skills
       }
     }
 
-    const stillEmpty = indexesNeedingBeta.filter(i => !users[i].skills?.length);
-    if (!stillEmpty.length) return;
+    // ----- Pass 2 — beta profile skills (with proficiency) for ALL users; merge/enrich -----
+    const allIdx = Array.from({ length: users.length }, (_, i) => i);
+    const betaGroups = chunk(allIdx, EFFECTIVE_BATCH);
 
-    // Phase 2 — beta profile skills (with proficiency)
-    const betaGroups = chunk(stillEmpty, BATCH_SIZE);
     for (const grp of betaGroups) {
       const req = {
         requests: grp.map((idx) => ({
@@ -61,21 +90,86 @@ export class SkillsService {
           url: `/users/${users[idx].id}/profile/skills?$select=displayName,proficiency`
         }))
       };
+
       try {
         const res = await this.client.api('/$batch').version('beta').post(req);
-        if (res?.responses) {
-          res.responses.forEach((r: any) => {
-            const idx = parseInt(r.id, 10);
-            if (r.status === 200 && Array.isArray(r.body?.value) && r.body.value.length) {
-              users[idx].skills = r.body.value.map((s: any) => ({
-                displayName: s.displayName, proficiency: s.proficiency
-              }));
-            }
-          });
+        const responses = Array.isArray(res?.responses) ? (res.responses as BetaBatchItem[]) : [];
+        for (const r of responses) {
+          const idx = Number.parseInt(String(r.id), 10);
+          if (!Number.isFinite(idx) || r.status !== 200) continue;
+
+          const raw = r.body?.value ?? [];
+          if (!raw.length) continue;
+
+          const items: BetaSkill[] = raw
+            .map((b: GraphProfileSkill): BetaSkill => ({
+              displayName: (b.displayName ?? '').toString().trim(),
+              proficiency: b.proficiency ?? undefined
+            }))
+            .filter((b: BetaSkill) => b.displayName.length > 0);
+
+          if (items.length) this.mergeBeta(users[idx], items);
         }
       } catch {
-        // ignore — beacouse there are users without skills
+        // some tenants/users won’t have profile skills — that’s fine
       }
     }
+  }
+
+  // ---------- merge helpers ----------
+
+  /** Merge plain string skills (v1.0) without duplicates. */
+  private mergeV1(user: Person, names: string[]): void {
+    user.skills ||= [];
+    const map = this.mapByName(user.skills);
+
+    for (const name of names) {
+      const key = this.norm(name);
+      if (!key) continue;
+      if (!map.has(key)) {
+        const s: Skill = { displayName: name };
+        user.skills.push(s);
+        map.set(key, s);
+      }
+    }
+  }
+
+  /** Merge beta skills (adds proficiency and missing skill rows). */
+  private mergeBeta(user: Person, beta: BetaSkill[]): void {
+    user.skills ||= [];
+    const map = this.mapByName(user.skills);
+
+    for (const b of beta) {
+      const key = this.norm(b.displayName);
+      if (!key) continue;
+
+      const existing = map.get(key);
+      if (existing) {
+        // enrich, don’t overwrite displayName
+        if (b.proficiency) existing.proficiency = b.proficiency;
+      } else {
+        const s: Skill = { displayName: b.displayName, proficiency: b.proficiency };
+        user.skills.push(s);
+        map.set(key, s);
+      }
+    }
+  }
+
+  private mapByName(skills: Skill[]): Map<string, Skill> {
+    const m = new Map<string, Skill>();
+    for (const s of skills) {
+      const key = this.norm(s.displayName);
+      if (key && !m.has(key)) m.set(key, s);
+    }
+    return m;
+  }
+
+  private norm(s?: string): string {
+    return (s ?? '')
+      .toString()
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
   }
 }
