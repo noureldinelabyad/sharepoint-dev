@@ -2,7 +2,7 @@
 
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { PeopleResult, Person } from './models';
-import { SERVICE_LIKE_DENY, ALLOWED_EMAIL_RX } from './constants';
+import { SERVICE_LIKE_DENY, ALLOWED_EMAIL_RX, HAS_NO_ROLE } from './constants';
 
 /**
  * Repository for directory user reads.
@@ -32,8 +32,9 @@ export class UsersRepository {
       .header('ConsistencyLevel', 'eventual')
       .count(true)
       .select('id,displayName,jobTitle,department,mail,otherMails,userPrincipalName,accountEnabled,userType,assignedLicenses')
-      .filter("accountEnabled eq true and (userType eq 'Member' or userType eq 'Guest') and assignedLicenses/$count ne 0"+
-       "and (endswith(mail,'@thinformatics.com') or endswith(userPrincipalName,'@thinformatics.com'))")
+      .filter("accountEnabled eq true and (userType eq 'Member') and assignedLicenses/$count ne 0"+
+       "and (endswith(mail,'@thinformatics.com') or endswith(userPrincipalName,'@thinformatics.com')) " +
+        "and (jobTitle ne null or department ne null)" )
       .orderby('displayName')
       .top(pageSize)
       .get();
@@ -90,7 +91,8 @@ export class UsersRepository {
     return users.filter(u =>
       u.displayName && !SERVICE_LIKE_DENY.test(u.displayName) &&
       u.userPrincipalName && !SERVICE_LIKE_DENY.test(u.userPrincipalName) &&
-      this.hasAllowedDomain(u)
+      this.hasAllowedDomain(u) &&
+      !HAS_NO_ROLE(u.jobTitle, u.department)
     );
   }
 
