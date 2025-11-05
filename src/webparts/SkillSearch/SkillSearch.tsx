@@ -61,9 +61,18 @@ export default function SkillSearch({ context }: SkillSearchProps) {
       ? `${filtered.length} Ergebnis(se) für „${query}“${!fullyLoaded ? "" : ""}`
       : `${people.length}${!fullyLoaded ? " +" : ""} Personen geladen${bulkLoading && !fullyLoaded ? " …" : ""}`;
 
+  const absWebUrl = context.pageContext.web.absoluteUrl;
+  const serverRelWebUrl = context.pageContext.web.serverRelativeUrl;
+
   return (
     <>
-      <HeroMeCard me={me} onOpenSkills={(name, skills) => setSkillsModal({ name, skills })} />
+      <HeroMeCard
+        me={me}
+        onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
+        spHttpClient={context.spHttpClient}
+        absWebUrl={absWebUrl}
+        serverRelWebUrl={serverRelWebUrl}
+      />
 
       <SearchBar
         query={query}
@@ -83,17 +92,24 @@ export default function SkillSearch({ context }: SkillSearchProps) {
           {filtered.length === 0 && query && (
             <li className={styles.noResults}>Keine Treffer. Versuche andere Begriffe.</li>
           )}
+
           {filtered.map(p => (
             <PersonCard
               key={p.id}
               person={p}
               tokens={tokens}
               onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
-              outlookUrl={() => `mailto:${p.mail || p.userPrincipalName}`} // your real links here
-              teamsUrl={() => `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(p.mail || p.userPrincipalName)}`}
+              outlookUrl={() => `mailto:${p.mail || p.userPrincipalName}`}
+              teamsUrl={() =>
+                `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(p.mail || p.userPrincipalName)}`
+              }
               profilesUrl={"https://thinformatics.sharepoint.com/sites/Beraterprofile/Freigegebene%20Dokumente/Forms/AllItems.aspx?as=json"}
+              spHttpClient={context.spHttpClient}
+              absWebUrl={absWebUrl}
+              serverRelWebUrl={serverRelWebUrl}
             />
           ))}
+
           {loadingMore && !query && <li>Loading more…</li>}
         </ul>
       </div>

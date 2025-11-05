@@ -16,7 +16,8 @@
 
     "typeRoots": [
       "./node_modules/@types",
-      "./node_modules/@microsoft"
+      "./node_modules/@microsoft",
+      "./src/webparts/SkillSearch/types"
     ],
     "types": [
       "webpack-env"
