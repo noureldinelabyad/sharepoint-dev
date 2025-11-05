@@ -41,7 +41,7 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, ab
   // 1) Is the current viewer privileged?
   const isPrivileged = React.useMemo(() => {
     const jt = (me.jobTitle || "").toLowerCase();
-    return ["head of", "hr", "sales", "ceo"].some(k => jt.includes(k));
+    return ["head of", "hr", "sales", "ceo", "trainee"].some(k => jt.includes(k));
   }, [me.jobTitle]);
 
   // 2) Publish flag so PersonCard can read it

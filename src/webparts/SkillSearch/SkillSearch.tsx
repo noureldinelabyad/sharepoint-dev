@@ -99,7 +99,20 @@ export default function SkillSearch({ context }: SkillSearchProps) {
               person={p}
               tokens={tokens}
               onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
-              outlookUrl={() => `mailto:${p.mail || p.userPrincipalName}`}
+              outlookUrl={(p) => {
+                const to = encodeURIComponent(p.mail || p.userPrincipalName);
+                const subject = encodeURIComponent(`Termin mit ${p.displayName}`);
+                // prefill times (ISO 8601), body, location, etc.
+                // const start = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // +1h
+                // const end   = new Date(Date.now() + 2 * 60 * 60 * 1000).toISOString(); // +2h
+                // const body = encodeURIComponent('Kurzbeschreibung …');
+                // const location = encodeURIComponent('Teams');
+
+                return `https://outlook.office.com/calendar/deeplink/compose?to=${to}&subject=${subject}`;
+                // Add time if needed:
+                // + `&startdt=${start}&enddt=${end}&body=${body}&location=${location}&allday=false`
+              }}
+
               teamsUrl={() =>
                 `https://teams.microsoft.com/l/chat/0/0?users=${encodeURIComponent(p.mail || p.userPrincipalName)}`
               }
