@@ -27,7 +27,7 @@ interface BetaBatchItem {
 type BetaSkill = { displayName: string; proficiency?: string };
 
 // Graph enforces max 20 requests per $batch
-const GRAPH_BATCH_LIMIT = 20;
+const GRAPH_BATCH_LIMIT = BATCH_SIZE ;
 const EFFECTIVE_BATCH = Math.min(
   typeof BATCH_SIZE === 'number' && BATCH_SIZE > 0 ? BATCH_SIZE : GRAPH_BATCH_LIMIT,
   GRAPH_BATCH_LIMIT

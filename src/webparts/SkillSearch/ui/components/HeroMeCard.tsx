@@ -2,9 +2,17 @@ import * as React from "react";
 import styles from "../../SkillSearch.module.scss";
 import { Me, Skill } from "../../services/models";
 import { effectiveProficiency, sortSkillsByLevel } from "../../utils/skills";
-import { GernrateCv } from "./ProfileActions";
+
+import { GenerateCv } from "./ProfileActions";
 import { SPHttpClient } from "@microsoft/sp-http";
 import { buildFolderViewUrlAsync } from "../../services/profileRepo";
+
+//import { getPhotosService } from "../../services/PhotoService";
+import { makeInitialsAvatar } from "../../services/utils";
+import { getPhotosService } from "../../services/PhotoService";
+
+import { profilesUrl } from "../../services/constants";
+import { RBA_ALLOW } from "../../services/constants";
 
 type Props = {
   me: Me;
@@ -12,16 +20,33 @@ type Props = {
   spHttpClient: SPHttpClient;
   absWebUrl: string;
   serverRelWebUrl: string;
+  msGraphClientFactory: any;
+
 };
 
-export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, absWebUrl, serverRelWebUrl }) => {
+export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, absWebUrl, serverRelWebUrl, msGraphClientFactory }) => {
   const skills = sortSkillsByLevel(me.skills || []);
   const visible = skills.slice(0, 5);
 
-  const profilesUrl =
-    "https://thinformatics.sharepoint.com/sites/Beraterprofile/Freigegebene%20Dokumente/Forms/AllItems.aspx?as=json";
+  // const initialsUrl = React.useMemo(() => makeInitialsAvatar(me.displayName, 72), [me.displayName]);
+
+  // const [photoUrl, setPhotoUrl] = React.useState<string>(initialsUrl);
+
 
   const displayName = me.displayName;
+  const initialsUrl = React.useMemo(() => makeInitialsAvatar(me.displayName, 96), [me.displayName]);
+  const [photoUrl, setPhotoUrl] = React.useState<string | null | undefined>(undefined);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    if (photoUrl !== undefined) return;
+    (async () => {
+      const svc = await getPhotosService(msGraphClientFactory, { preferSize: 96, concurrency: 2 });
+      const url = await svc.getUrl({ id: me.id, userPrincipalName: me.userPrincipalName });
+      if (!cancelled) setPhotoUrl(url ?? null);
+    })();
+    return () => { cancelled = true; };
+  }, [photoUrl, msGraphClientFactory, me.id, me.userPrincipalName]);
 
   // Resolve Profilordner URL for *me*
   const [profileFolderUrl, setProfileFolderUrl] = React.useState<string | null>(null);
@@ -41,7 +66,7 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, ab
   // 1) Is the current viewer privileged?
   const isPrivileged = React.useMemo(() => {
     const jt = (me.jobTitle || "").toLowerCase();
-    return ["head of", "hr", "sales", "ceo"].some(k => jt.includes(k));
+    return RBA_ALLOW.test(jt);
   }, [me.jobTitle]);
 
   // 2) Publish flag so PersonCard can read it
@@ -57,10 +82,10 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, ab
     <ul className={styles["templateCards"]} style={{ background: "#fff", gridTemplateColumns: "1fr" }}>
       <li className={styles.card}>
         <div className={styles["cardImage"]}>
-          <img
-            src={me.photoUrl ?? "https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/9.6.1/images/persona/size72.png"}
-            alt={me.displayName}
-          />
+         <img src={photoUrl ?? initialsUrl}
+           alt={me.displayName}
+           onError={() => { if (photoUrl) setPhotoUrl(null); }}
+         />
         </div>
 
         <div className={styles["cardName"]}>{me.displayName}</div>
@@ -71,7 +96,7 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, ab
 
         <div style={{ width: '100%', margin: '2px', gap: '8px', display: 'flex', justifyContent: 'center' }}>
           {/* Actions: open folder + generate CV (download) */}
-          <GernrateCv
+          <GenerateCv
             spHttpClient={spHttpClient}
             absWebUrl={absWebUrl}
             serverRelWebUrl={serverRelWebUrl}
