@@ -17,7 +17,7 @@ export interface Person {
 }
 
 export interface Me extends Person {
-  /** “About me” text (Delve/MyAccount). */
+  /** “About me” text. */
   aboutMe?: string;
   /** “Ask me about” keywords. */
   responsibilities?: string[];

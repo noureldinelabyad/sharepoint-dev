@@ -2,7 +2,6 @@
 
 import { MSGraphClientV3 } from '@microsoft/sp-http';
 import { Me } from './models';
-import { PhotosService } from './PhotoService';
 
 export class MeService {
   constructor(private client: MSGraphClientV3) {}
@@ -23,7 +22,6 @@ export class MeService {
         .catch(() => ({ skills: [] }))
     ]);
 
-    const photoSvc = new PhotosService(this.client);
     const me: Me = {
       id: meBasic.id,
       displayName: meBasic.displayName,
@@ -40,7 +38,6 @@ export class MeService {
       }))
     };
 
-    await photoSvc.enrich([me]);
     return me;
   }
 }

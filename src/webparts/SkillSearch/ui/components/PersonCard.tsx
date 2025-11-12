@@ -1,11 +1,15 @@
+// src/webparts/SkillSearch/ui/components/PersonCard.tsx
 import * as React from "react";
 import styles from "../../SkillSearch.module.scss";
 import { Person, Skill } from "../../services/models";
 import { highlightToNodes, prioritiseSkills } from "../../utils/search";
 import { sortSkillsByLevel } from "../../utils/skills";
-import { GernrateCv } from "./ProfileActions";
+import { GenerateCv } from "./ProfileActions";
 import { SPHttpClient } from "@microsoft/sp-http";
 import { buildFolderViewUrlAsync } from "../../services/profileRepo";
+import { makeInitialsAvatar } from "../../services/utils";
+import { getPhotosService } from "../../services/PhotoService";
+import { useVisibility } from "../hooks/useVisibility";
 
 type Props = {
   person: Person;
@@ -17,36 +21,63 @@ type Props = {
   spHttpClient: SPHttpClient;
   absWebUrl: string;
   serverRelWebUrl: string;
+  msGraphClientFactory: any;     // <-- add this so we can fetch photos
 };
 
 const INLINE_LIMIT = 3;
 
 export const PersonCard: React.FC<Props> = ({
   person, tokens, onOpenSkills, outlookUrl, teamsUrl, profilesUrl,
-  spHttpClient, absWebUrl, serverRelWebUrl
+  spHttpClient, absWebUrl, serverRelWebUrl, msGraphClientFactory
 }) => {
   const ranked = React.useMemo(() => sortSkillsByLevel(person.skills || []), [person.skills]);
   const skills = React.useMemo(() => prioritiseSkills(ranked, tokens), [ranked, tokens]);
-
   const visible = skills.slice(0, INLINE_LIMIT);
 
-  const skillsRef = React.useRef<HTMLDivElement>(null);
-  const [isClamped, setIsClamped] = React.useState(false);
+  // create initials once
+  const initialsUrl = React.useMemo(() => makeInitialsAvatar(person.displayName, 72), [person.displayName]);
 
-  // Resolve Profilordner URL for the *target person*
-  const [profileFolderUrl, setProfileFolderUrl] = React.useState<string | null>(null);
+
+  // ---- FAST FIRST PAINT ----
+  const { ref, visible: onScreen } = useVisibility<HTMLLIElement>('300px');
+  const [photoUrl, setPhotoUrl] = React.useState<string | null | undefined>(undefined); // undefined = not asked yet
+
   React.useEffect(() => {
     let cancelled = false;
+    if (!onScreen || photoUrl !== undefined) return;
+
     (async () => {
-      try {
-        const url = await buildFolderViewUrlAsync(spHttpClient, absWebUrl, serverRelWebUrl, person.displayName);
-        if (!cancelled) setProfileFolderUrl(url);
-      } catch {
-        if (!cancelled) setProfileFolderUrl(null);
-      }
+      const svc = await getPhotosService(msGraphClientFactory, { preferSize: 72, concurrency: 4 });
+      const url = await svc.getUrl({ id: person.id, userPrincipalName: person.userPrincipalName });
+      if (!cancelled) setPhotoUrl(url ?? null);
     })();
+
     return () => { cancelled = true; };
-  }, [spHttpClient, absWebUrl, serverRelWebUrl, person.displayName]);
+  }, [onScreen, photoUrl, msGraphClientFactory, person.id, person.userPrincipalName]);
+
+  // ---- PROFILORDNER: resolve on click, not on mount ----
+  const [folderHref, setFolderHref] = React.useState<string | null>(null);
+  const [resolvingFolder, setResolvingFolder] = React.useState(false);
+
+  async function handleOpenFolder(e: React.MouseEvent) {
+    if (folderHref) return; // already resolved; normal nav
+    e.preventDefault();
+    if (resolvingFolder) return;
+
+    setResolvingFolder(true);
+    try {
+      const url = await buildFolderViewUrlAsync(spHttpClient, absWebUrl, serverRelWebUrl, person.displayName);
+      if (url) {
+        setFolderHref(url);
+        // navigate now
+        window.open(url, "_blank", "noopener,noreferrer");
+      } else {
+        alert('Profilordner nicht gefunden oder Zugriff fehlt.');
+      }
+    } finally {
+      setResolvingFolder(false);
+    }
+  }
 
   // Read privileged flag set by HeroMeCard (fallback to storage)
   const isPrivileged = React.useMemo(() => {
@@ -55,34 +86,19 @@ export const PersonCard: React.FC<Props> = ({
       return localStorage.getItem("skillsearch.isPrivileged") === "1";
     } catch { return false; }
   }, []);
+  const showFolderBtn = isPrivileged;
 
-  const showFolderBtn = isPrivileged; // privileged users see Profilordner on all person cards
-  
-  //const showFolderBtn = true;
-
-  React.useLayoutEffect(() => {
-    const el = skillsRef.current;
-    if (!el) return;
-    const check = () => {
-      const vertical = el.scrollHeight > el.clientHeight + 1;
-      const horizontal = el.scrollWidth > el.clientWidth + 1;
-      setIsClamped(vertical || horizontal);
-    };
-    check();
-    const ro = new ResizeObserver(check);
-    ro.observe(el);
-    const t = requestAnimationFrame(check);
-    return () => { ro.disconnect(); cancelAnimationFrame(t); };
-  }, [person.id, visible.length]);
-
-  const showAllButton = isClamped || skills.length > INLINE_LIMIT;
+  //const defaultAvatar = "https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/9.6.1/images/persona/size72.png";
 
   return (
-    <li className={styles.card}>
+    <li ref={ref} className={styles.card}>
       <div className={styles.cardImage}>
         <img
-          src={person.photoUrl ?? "https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/9.6.1/images/persona/size72.png"}
+          src={photoUrl ?? initialsUrl} 
           alt={person.displayName}
+          // Optional: hide broken image icon if photoUrl === null
+          onError={(e) => { if (photoUrl) setPhotoUrl(null); }}
+         //onError={() => setPhotoUrl(null)}      // if blob breaks, fall back to initials
         />
       </div>
 
@@ -103,14 +119,24 @@ export const PersonCard: React.FC<Props> = ({
       </div>
 
       <div className={styles.cardLinks}>
-        {/* Actions: open folder + generate CV (download) */}
+        
         {showFolderBtn && (
-          <GernrateCv
-            spHttpClient={spHttpClient}
-            absWebUrl={absWebUrl}
-            serverRelWebUrl={serverRelWebUrl}
-            displayName={person.displayName}
-          />
+          <a
+            className={styles.linkBtn}
+            role="button"
+            href={folderHref || '#'}
+            target="_blank"
+            rel="noopener noreferrer"
+            aria-label={`Profilordner von ${person.displayName} öffnen`}
+            onClick={handleOpenFolder}
+          >
+            <img
+              src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_SharePoint_(2019%E2%80%93present).svg.png?csf=1&web=1&e=etkaPW"
+              alt=""
+              className={styles.logo}
+            />
+            {resolvingFolder ? 'Suchen…' : 'Profilordner'}
+          </a>
         )}
 
         <a className={styles.linkBtn} href={outlookUrl(person)} target="_blank" rel="noopener noreferrer">
@@ -122,33 +148,18 @@ export const PersonCard: React.FC<Props> = ({
           Chat
         </a>
 
+        {/* Generate CV button (unchanged) */}
         {showFolderBtn && (
-          <a
-            className={styles.linkBtn}
-            role="button"
-            href={profileFolderUrl || '#'}
-            target="_blank"
-            rel="noopener noreferrer"
-            aria-label={`Profilordner von ${/* person or me */ person?.displayName} öffnen`}
-            onClick={(e) => {
-              if (!profileFolderUrl) {
-                e.preventDefault();
-                alert('Profilordner nicht gefunden oder Zugriff fehlt.');
-              }
-            }}
-          >
-            <img
-              src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_SharePoint_(2019%E2%80%93present).svg.png?csf=1&web=1&e=etkaPW"
-              alt=""
-              className={styles.logo}
-            />
-            Profilordner
-          </a>
+          <GenerateCv
+            spHttpClient={spHttpClient}
+            absWebUrl={absWebUrl}
+            serverRelWebUrl={serverRelWebUrl}
+            displayName={person.displayName}
+          />
         )}
-
       </div>
 
-      <div ref={skillsRef} className={styles.cardSkills}>
+      <div className={styles.cardSkills}>
         {visible.map((s, i) => (
           <span key={i} className={styles.skill} title={s.displayName}>
             {highlightToNodes(s.displayName, tokens)}
@@ -157,15 +168,11 @@ export const PersonCard: React.FC<Props> = ({
         ))}
       </div>
 
-      {showAllButton && (
-        <button
-          className={styles.showAllBtn}
-          onClick={() => onOpenSkills(person.displayName, skills)}
-        >
+      {(skills.length > INLINE_LIMIT) && (
+        <button className={styles.showAllBtn} onClick={() => onOpenSkills(person.displayName, skills)}>
           Alle ({skills.length}) Skills anzeigen
         </button>
       )}
-
     </li>
   );
 };

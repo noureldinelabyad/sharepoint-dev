@@ -22,7 +22,7 @@ type Props = {
   displayName: string;         // e.g. "Noureldin Elabyad"
 };
 
-export const GernrateCv: React.FC<Props> = ({
+export const GenerateCv: React.FC<Props> = ({
   spHttpClient, absWebUrl, serverRelWebUrl, displayName
 }) => {
   const [busy, setBusy] = React.useState(false);
@@ -86,4 +86,4 @@ export const GernrateCv: React.FC<Props> = ({
   );
 };
 
-export default GernrateCv;
+export default GenerateCv;

@@ -48,7 +48,7 @@ export class UsersRepository {
    * Fallback when directory-list permissions aren’t approved:
    * Returns a relevant “people” list for the current user.
    */
-  async getRelevantPeople(pageSize = 500): Promise<PeopleResult> {
+  async getRelevantPeople(pageSize = 100): Promise<PeopleResult> {
     const res = await this.client.api('/me/people')
       .select('id,displayName,userPrincipalName,jobTitle,department,scoredEmailAddresses')
       .top(pageSize)
