@@ -1,6 +1,6 @@
 import * as React from "react";
 import { MSGraphClientV3 } from "@microsoft/sp-http";
-import { GraphFacade, Me, Person, PeopleResult } from "../../services";
+import { GraphFacade, Me, Person,  } from "../../services";
 
 /**
  * Strategy:
@@ -16,6 +16,9 @@ function mergeUniqueById(prev: Person[], incoming: Person[]): Person[] {
   for (const p of incoming) if (!map.has(p.id)) map.set(p.id, p);
   return Array.from(map.values());
 }
+
+const CHUNK = 12;
+const PREFETCH_DELAY_MS = 120;
 
 export function usePeople(msGraphClientFactory: any) {
   const [me, setMe] = React.useState<Me | null>(null);
@@ -39,31 +42,29 @@ export function usePeople(msGraphClientFactory: any) {
     try {
       const svc = await getClient();
 
-      // Me
+      // me
       const meData = await svc.getMe();
       setMe(meData);
 
-      // First page (fast)
+      // fast initial fetch: request CHUNK items so first paint is quick
       try {
-        const { items, nextLink } = await svc.getPeoplePage(100);
-        setPeople(items);
-        setAllPeople(items);
+        const { items, nextLink } = await svc.getPeoplePage(CHUNK);
+        setPeople(items);       // visible: first CHUNK immediately
+        setAllPeople(items);    // search index starts with same
         setNext(nextLink);
-
-       // If there's no next page, we are already fully loaded.
         setFullyLoaded(!nextLink);
       } catch {
-        // Fallback when /users is not consented
-        const { items } = await svc.getPeopleFallback(50); 
-        setPeople(items);
+        // fallback (smaller result set) — still show only CHUNK
+        const { items } = await svc.getPeopleFallback(50);
+        setPeople(items.slice(0, CHUNK));
         setAllPeople(items);
         setNext(undefined);
-        
-        //  /me/people has no paging – we’re done.
         setFullyLoaded(true);
       }
+
+      // Stop global loading so UI becomes interactive; prefetch continues in background
     } catch (e: any) {
-      setError(e?.message ?? "Unknown error");
+      setError(e?.message ?? 'Unknown error');
     } finally {
       setLoading(false);
     }
@@ -75,11 +76,15 @@ export function usePeople(msGraphClientFactory: any) {
     setLoadingMore(true);
     try {
       const svc = await getClient();
-      const { items, nextLink }: PeopleResult = await svc.getPeoplePage(100, next);
-      setPeople(prev => [...prev, ...items]);
+      // request a larger page from the next cursor, append in CHUNK-sized slices
+      const { items, nextLink } = await svc.getPeoplePage(100, next);
       setAllPeople(prev => mergeUniqueById(prev, items));
+      // append only CHUNK now so visible list grows progressively
+      setPeople(prev => mergeUniqueById(prev, items.slice(0, CHUNK)));
       setNext(nextLink);
       if (!nextLink) setFullyLoaded(true);
+    } catch (e) {
+      console.warn('loadMore failed', e);
     } finally {
       setLoadingMore(false);
     }
@@ -94,14 +99,24 @@ export function usePeople(msGraphClientFactory: any) {
       let cursor: string | undefined = next;
       while (cursor) {
         const { items, nextLink } = await svc.getPeoplePage(500, cursor);
+        // merge to search index immediately
         setAllPeople(prev => mergeUniqueById(prev, items));
+
+        // progressively reveal items in CHUNK batches with tiny pauses
+        for (let i = 0; i < items.length; i += CHUNK) {
+          const batch = items.slice(i, i + CHUNK);
+          setPeople(prev => mergeUniqueById(prev, batch));
+          // allow paint and keep UI responsive
+          // eslint-disable-next-line no-await-in-loop
+          await new Promise(res => setTimeout(res, PREFETCH_DELAY_MS));
+        }
+
         cursor = nextLink;
         setNext(cursor);
       }
       setFullyLoaded(true);
     } catch (e) {
-      // Not fatal—users still have first page + fallback paths
-      console.warn("Background prefetch failed:", e);
+      console.warn('Background prefetch failed', e);
     } finally {
       setBulkLoading(false);
     }

@@ -1,5 +1,7 @@
 import * as React from "react";
 import styles from "../../SkillSearch.module.scss";
+import { AVATAR } from '../../services/constants';
+
 import { Me, Skill } from "../../services/models";
 import { effectiveProficiency, sortSkillsByLevel } from "../../utils/skills";
 
@@ -8,8 +10,7 @@ import { SPHttpClient } from "@microsoft/sp-http";
 import { buildFolderViewUrlAsync } from "../../services/profileRepo";
 
 //import { getPhotosService } from "../../services/PhotoService";
-import { makeInitialsAvatar } from "../../services/utils";
-import { getPhotosService } from "../../services/PhotoService";
+import { getPhotosService, makeInlineInitialsPlaceholder } from "../../services/PhotoService";
 
 import { profilesUrl } from "../../services/constants";
 import { RBA_ALLOW } from "../../services/constants";
@@ -28,21 +29,17 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, ab
   const skills = sortSkillsByLevel(me.skills || []);
   const visible = skills.slice(0, 5);
 
-  // const initialsUrl = React.useMemo(() => makeInitialsAvatar(me.displayName, 72), [me.displayName]);
-
-  // const [photoUrl, setPhotoUrl] = React.useState<string>(initialsUrl);
-
-
-  const displayName = me.displayName;
-  const initialsUrl = React.useMemo(() => makeInitialsAvatar(me.displayName, 96), [me.displayName]);
+  const SIZE = AVATAR.hero;
+ const displayName = me.displayName;
+  const initialsUrl = React.useMemo(() => makeInlineInitialsPlaceholder(me.displayName, SIZE), [me.displayName]);
   const [photoUrl, setPhotoUrl] = React.useState<string | null | undefined>(undefined);
 
   React.useEffect(() => {
     let cancelled = false;
     if (photoUrl !== undefined) return;
     (async () => {
-      const svc = await getPhotosService(msGraphClientFactory, { preferSize: 96, concurrency: 2 });
-      const url = await svc.getUrl({ id: me.id, userPrincipalName: me.userPrincipalName });
+      const svc = await getPhotosService(msGraphClientFactory, { defaultSize: SIZE, concurrency: 2 });
+      const url = await svc.getUrl({ id: me.id, userPrincipalName: me.userPrincipalName }, SIZE);
       if (!cancelled) setPhotoUrl(url ?? null);
     })();
     return () => { cancelled = true; };
@@ -82,11 +79,15 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, ab
     <ul className={styles["templateCards"]} style={{ background: "#fff", gridTemplateColumns: "1fr" }}>
       <li className={styles.card}>
         <div className={styles["cardImage"]}>
-         <img src={photoUrl ?? initialsUrl}
-           alt={me.displayName}
-           onError={() => { if (photoUrl) setPhotoUrl(null); }}
-         />
-        </div>
+        <img
+          src={photoUrl ?? initialsUrl}
+          alt={me.displayName}
+          // Hero is LCP → eager + high priority
+          loading= "eager"
+          decoding="async"
+          onError={() => { if (photoUrl) setPhotoUrl(null); }}
+        />
+      </div>
 
         <div className={styles["cardName"]}>{me.displayName}</div>
 

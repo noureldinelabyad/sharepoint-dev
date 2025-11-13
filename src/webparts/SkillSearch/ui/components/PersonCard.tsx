@@ -1,6 +1,7 @@
 // src/webparts/SkillSearch/ui/components/PersonCard.tsx
 import * as React from "react";
 import styles from "../../SkillSearch.module.scss";
+import { AVATAR } from '../../services/constants';
 import { Person, Skill } from "../../services/models";
 import { highlightToNodes, prioritiseSkills } from "../../utils/search";
 import { sortSkillsByLevel } from "../../utils/skills";
@@ -35,8 +36,8 @@ export const PersonCard: React.FC<Props> = ({
   const visible = skills.slice(0, INLINE_LIMIT);
 
   // create initials once
-  const initialsUrl = React.useMemo(() => makeInitialsAvatar(person.displayName, 72), [person.displayName]);
-
+  const SIZE = AVATAR.list;
+  const initialsUrl = React.useMemo(() => makeInitialsAvatar(person.displayName, SIZE), [person.displayName]);
 
   // ---- FAST FIRST PAINT ----
   const { ref, visible: onScreen } = useVisibility<HTMLLIElement>('300px');
@@ -45,14 +46,12 @@ export const PersonCard: React.FC<Props> = ({
   React.useEffect(() => {
     let cancelled = false;
     if (!onScreen || photoUrl !== undefined) return;
-
     (async () => {
-      const svc = await getPhotosService(msGraphClientFactory, { preferSize: 72, concurrency: 4 });
-      const url = await svc.getUrl({ id: person.id, userPrincipalName: person.userPrincipalName });
+      const svc = await getPhotosService(msGraphClientFactory, { defaultSize: SIZE, concurrency: 4 });
+      const url = await svc.getUrl({ id: person.id, userPrincipalName: person.userPrincipalName }, SIZE);
       if (!cancelled) setPhotoUrl(url ?? null);
     })();
-
-    return () => { cancelled = true; };
+  return () => { cancelled = true; };
   }, [onScreen, photoUrl, msGraphClientFactory, person.id, person.userPrincipalName]);
 
   // ---- PROFILORDNER: resolve on click, not on mount ----
@@ -88,19 +87,17 @@ export const PersonCard: React.FC<Props> = ({
   }, []);
   const showFolderBtn = isPrivileged;
 
-  //const defaultAvatar = "https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/9.6.1/images/persona/size72.png";
-
   return (
     <li ref={ref} className={styles.card}>
-      <div className={styles.cardImage}>
-        <img
-          src={photoUrl ?? initialsUrl} 
-          alt={person.displayName}
-          // Optional: hide broken image icon if photoUrl === null
-          onError={(e) => { if (photoUrl) setPhotoUrl(null); }}
-         //onError={() => setPhotoUrl(null)}      // if blob breaks, fall back to initials
-        />
-      </div>
+     <div className={styles.cardImage}>
+      <img
+        src={photoUrl ?? initialsUrl}
+        alt={person.displayName}
+        loading="lazy"
+        decoding="async"
+        onError={() => { if (photoUrl) setPhotoUrl(null); }}
+      />
+    </div>
 
       <div className={styles.cardName}>
         {highlightToNodes(person.displayName, tokens)}

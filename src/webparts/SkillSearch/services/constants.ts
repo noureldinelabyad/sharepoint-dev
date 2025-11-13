@@ -22,3 +22,10 @@ export const isBlank = (s?: string): boolean => !s || !String(s).trim();
 /** True when BOTH job title and department are empty */
 export const HAS_NO_ROLE = (job?: string, dept?: string): boolean =>
   isBlank(job) && isBlank(dept);
+
+// Graph supports: 48, 64, 96, 120, 240, 360, 432, 504, 648
+export const AVATAR = {
+  list: 64,   // result cards
+  hero: 96    // top "me" card
+} as const;
+export type AvatarKind = keyof typeof AVATAR;
