@@ -52,76 +52,93 @@ export default function SkillSearch({ context }: SkillSearchProps) {
     if (el.scrollTop + el.clientHeight >= el.scrollHeight - 200) loadMore();
   }, [query, next, loadingMore, loadMore]);
 
-  if (loading) return <div>Loading profile…</div>;
-  if (error)   return <div style={{ color: "#a80000" }}>Error: {error}</div>;
-  if (!me)     return <div>No profile data.</div>;
-
-  const summary =
-    query
-      ? `${filtered.length} Ergebnis(se) für „${query}“${!fullyLoaded ? "" : ""}`
-      : `${people.length}${!fullyLoaded ? " +" : ""} Personen geladen${bulkLoading && !fullyLoaded ? " …" : ""}`;
-
   const absWebUrl = context.pageContext.web.absoluteUrl;
   const serverRelWebUrl = context.pageContext.web.serverRelativeUrl;
 
-  return (
-    <>
-      <HeroMeCard
-        me={me}
-        onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
-        spHttpClient={context.spHttpClient}
-        absWebUrl={absWebUrl}
-        serverRelWebUrl={serverRelWebUrl} 
-        msGraphClientFactory={context.msGraphClientFactory}      
-        />
+  // Render page even while loading so we can show skeletons and stay interactive.
+  // Errors still shown inline.
+  const heroNode = me ? (
+    <HeroMeCard
+      me={me}
+      onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
+      spHttpClient={context.spHttpClient}
+      absWebUrl={absWebUrl}
+      serverRelWebUrl={serverRelWebUrl}
+      msGraphClientFactory={context.msGraphClientFactory}
+    />
+  ) : (
+    <div className={styles.heroSkeleton} aria-hidden="true">
+      <div className={styles.cardImage}><div className={styles.skeletonAvatar} /></div>
+      <div className={styles.cardName + ' ' + styles.skeletonLine} />
+      <div className={styles.cardMeta + ' ' + styles.skeletonLine} />
+    </div>
+  );
 
-      <SearchBar
-        query={query}
-        onChange={setQuery}
-        summary={summary}
-        rightSlot={
-          <FilterMenu
-            availableDepts={deptsForUI}
-            state={filters}
-            onChange={setFilters}
-          />
-        }
-      />
+  if (error) return <div style={{ color: "#a80000" }}>Error: {error}</div>;
+ 
+   const summary =
+     query
+       ? `${filtered.length} Ergebnis(se) für „${query}“${!fullyLoaded ? "" : ""}`
+       : `${people.length}${!fullyLoaded ? " +" : ""} Personen geladen${bulkLoading && !fullyLoaded ? " …" : ""}`;
 
-      <div className={styles.peopleScroll} onScroll={onScroll}>
-        <ul className={styles["templateCards"]}>
-          {filtered.length === 0 && query && (
-            <li className={styles.noResults}>Keine Treffer. Versuche andere Begriffe.</li>
-          )}
-
-          {filtered.map(p => (
-            <PersonCard
-              key={p.id}
-              person={p}
-              tokens={tokens}
-              onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
-              outlookUrl={(person) =>
-                `https://outlook.office.com/calendar/action/compose?rru=addevent&path=/calendar/action/compose&to=${
-                  encodeURIComponent(person.mail || person.userPrincipalName)
-                }`
-              }
-              teamsUrl={(person) =>
-                `https://teams.microsoft.com/l/chat/0/0?users=${
-                  encodeURIComponent(person.mail || person.userPrincipalName)
-                }`
-              }
-              profilesUrl={`${context.pageContext.web.serverRelativeUrl}/_layouts/15/me.aspx`}
-                spHttpClient={context.spHttpClient}
-                absWebUrl={context.pageContext.web.absoluteUrl}
-                serverRelWebUrl={context.pageContext.web.serverRelativeUrl}
-                msGraphClientFactory={context.msGraphClientFactory}
-            />
-          ))}
-
-          {loadingMore && !query && <li>Loading more…</li>}
-        </ul>
-      </div>
-
+   return (
+     <>
+       {heroNode}
+       <SearchBar
+         query={query}
+         onChange={setQuery}
+         summary={summary}
+         rightSlot={
+           <FilterMenu
+             availableDepts={deptsForUI}
+             state={filters}
+             onChange={setFilters}
+           />
+         }
+       />
+ 
+       <div className={styles.peopleScroll} onScroll={onScroll}>
+         <ul className={styles["templateCards"]}>
+           {loading && people.length === 0 ? (
+             // show 12 skeleton cards for fast first paint
+             Array.from({ length: 12 }).map((_, i) => (
+               <li key={`sk-${i}`} className={styles.card} aria-hidden="true">
+                 <div className={styles.cardImage}><div className={styles.skeletonAvatar} /></div>
+                 <div className={styles.cardName + ' ' + styles.skeletonLine} />
+                 <div className={styles.cardMeta + ' ' + styles.skeletonLine} />
+               </li>
+             ))
+           ) : (
+             filtered.map(p => (
+               <PersonCard
+                 key={p.id}
+                 person={p}
+                 tokens={tokens}
+                 onOpenSkills={(name, skills) => setSkillsModal({ name, skills })}
+                 outlookUrl={(person) =>
+                   `https://outlook.office.com/calendar/action/compose?rru=addevent&path=/calendar/action/compose&to=${
+                     encodeURIComponent(person.mail || person.userPrincipalName)
+                   }`
+                 }
+                 teamsUrl={(person) =>
+                   `https://teams.microsoft.com/l/chat/0/0?users=${
+                     encodeURIComponent(person.mail || person.userPrincipalName)
+                   }`
+                 }
+                 profilesUrl={`${context.pageContext.web.serverRelativeUrl}/_layouts/15/me.aspx`}
+                 spHttpClient={context.spHttpClient}
+                 absWebUrl={context.pageContext.web.absoluteUrl}
+                 serverRelWebUrl={context.pageContext.web.serverRelativeUrl}
+                 msGraphClientFactory={context.msGraphClientFactory}
+               />
+             ))
+           )}
+ 
+           {loadingMore && !query && <li>Loading more…</li>}
+         </ul>
+       </div>
+ 
+      {/* render skills modal when set */}
       {skillsModal && (
         <SkillsModal
           name={skillsModal.name}
@@ -129,6 +146,6 @@ export default function SkillSearch({ context }: SkillSearchProps) {
           onClose={() => setSkillsModal(null)}
         />
       )}
-    </>
-  );
-}
+     </>
+   );
+ }

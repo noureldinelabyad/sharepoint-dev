@@ -302,3 +302,38 @@ ul.templateCards {
     }
   }
 }
+
+/* skeleton / placeholder visuals */
+.heroSkeleton {
+  background: #fff;
+  border-radius: 32px;
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  margin: 0 20px 1rem 20px;
+}
+.skeletonAvatar {
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  background: linear-gradient(90deg, #e9ecef 25%, #f6f7f8 50%, #e9ecef 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s linear infinite;
+  margin-bottom: .75rem;
+}
+.skeletonLine {
+  width: 60%;
+  height: 12px;
+  background: #e9ecef;
+  border-radius: 6px;
+  margin: 6px 0;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0 }
+  100% { background-position: -200% 0 }
+}
+/* reuse for card list placeholders */
+.card .skeletonAvatar { width: 64px; height: 64px; margin: 0 auto .75rem; }
+.card .skeletonLine { width: 50%; height: 10px; }
