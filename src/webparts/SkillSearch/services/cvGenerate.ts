@@ -57,7 +57,7 @@ export interface ProfileData {
 }
 
 // ---------- Constants ----------
-const MISSING_TOKEN = '__ANPASSEN__';
+const MISSING_TOKEN = '__BITTE ANPASSEN!__';
 
 // ---------- Binary download ----------
 export async function downloadArrayBuffer(spHttp: SPHttpClient, urlOrServerRel: string): Promise<ArrayBuffer> {
@@ -657,9 +657,9 @@ export async function fillDataportTemplate(
     throw err;
   }
 
-  // Ensure both generated tokens and literal "anpassen" are yellow
-  highlightAndReplaceInZip(doc.getZip(), MISSING_TOKEN, 'anpassen');
-  highlightLiteralInZip(doc.getZip(), 'anpassen');
+  // Ensure both generated tokens and literal "Bitte anpassen!" are yellow
+  highlightAndReplaceInZip(doc.getZip(), MISSING_TOKEN, 'Bitte anpassen!');
+  highlightLiteralInZip(doc.getZip(), 'Bitte anpassen!');
 
   // Copy photo into the first embedded image in the body
   if (d.photoBytes && d.photoBytes.length) {
@@ -912,7 +912,7 @@ export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
     return new DOCX.TableRow({
       children: [
         new DOCX.TableCell({ width: { size: 30, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold(label)] }),
-        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ text: value || 'anpassen' })] })
+        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ text: value || 'Bitte anpassen!' })] })
       ]
     });
   }
