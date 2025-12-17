@@ -29,3 +29,7 @@ export const AVATAR = {
   hero: 96    // top "me" card
 } as const;
 export type AvatarKind = keyof typeof AVATAR;
+
+// Placeholder token for missing CV data fields.
+export const MISSING_TOKEN = '__BITTE ANPASSEN!__';
+
