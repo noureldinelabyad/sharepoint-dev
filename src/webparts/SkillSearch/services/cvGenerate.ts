@@ -383,7 +383,7 @@ function splitProjectRightColumn(right: string): {
     }
 
     // continuation line: append to previous bullet
-    if (bullets.length) {
+    if (/^[a-zäöü]/i.test(l) && bullets.length) {
       bullets[bullets.length - 1] = `${bullets[bullets.length - 1]} ${l}`.trim();
     }
   }
@@ -597,7 +597,11 @@ export async function fillDataportTemplate(
         headline: v(p.headline),
         description: v(p.description),
         responsibilitiesTitle: v(p.responsibilitiesTitle || 'Verantwortlichkeiten:'),
-        bullets: (p.bullets && p.bullets.length) ? p.bullets : [MISSING_TOKEN]
+        bullets: (p.bullets && p.bullets.length)
+          ? p.bullets
+              .map(b => (b ?? '').toString().trim())
+              .filter(b => b.length > 0)
+          : [MISSING_TOKEN]
       }))
     : [{
         period: MISSING_TOKEN,
