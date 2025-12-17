@@ -18,15 +18,12 @@ export interface ProjectItem {
   responsibilitiesTitle?: string;
   bullets?: string[];
 
-  // keep legacy fields (not used in the new “copy/paste” approach but kept for compatibility)
+  // legacy fields (kept for compatibility with older templates)
   title?: string;
   rolle: string;
   kunde: string;
   taetigkeiten: string[];
   technologien: string[];
-
-  // raw text (optional debug / fallback)
-  //details?: string;
 }
 
 export interface SkillGroup { category: string; items: string[]; }
@@ -41,7 +38,6 @@ export interface ProfileData {
   projects: ProjectItem[];
   skillGroups?: SkillGroup[];
 
-  // Optional extras your template may use
   firstName?: string;
   lastName?: string;
   birthYear?: string;
@@ -55,9 +51,9 @@ export interface ProfileData {
   education?: string;
   profilnummer?: string;
 
-  // NEW: photo extraction from source docx
+  // photo from source docx (optional)
   photoBytes?: Uint8Array;
-  photoExt?: string; // "png" | "jpg" | "jpeg" | ...
+  photoExt?: string; // "png" | "jpg" | "jpeg"
 }
 
 // ---------- Constants ----------
@@ -115,7 +111,6 @@ export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<P
 
       const key = (uniq[0] || '').replace(/:$/, '').toLowerCase();
       const value = uniq[uniq.length - 1] || '';
-
       if (key && value && key !== value) tablePairs[key] = value;
     }
   }
@@ -140,7 +135,7 @@ export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<P
     return href ? href.replace(/^mailto:/i, '') : '';
   })();
 
-  // 1) summary
+  // summary
   const rawSummary = grabBetween(
     /Zu meiner Person|Kurzprofil|Profil/i,
     /Kompetenzen|Skills|Kenntnisse|Zeitraum|Projekte|Tätigkeitsbeschreibung/i,
@@ -152,16 +147,12 @@ export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<P
     .join('\n')
     .trim();
 
-  // 2) skills
   const { flatSkills, skillGroups } = extractSkills(htmlDoc);
 
-  // 3) projects: read 2-column table and structure right side into bullets, etc.
+  // IMPORTANT: projects parsed from 2-column table, right column split into company/headline/desc/bullets
   const projects = parseProjectsCopyPaste(htmlDoc);
 
-  // 4) languages
   const languages = extractLanguages(allTables, textLines);
-
-  // 5) berufserfahrung
   const berufserfahrung = computeBerufserfahrungFromProjects(projects);
 
   return {
@@ -311,8 +302,8 @@ function parseProjectsCopyPaste(htmlDoc: Document): ProjectItem[] {
       const cells = Array.from(tr.cells);
       if (cells.length < 2) continue;
 
-      const left = normalizeWhitespace(extractCellTextPreservingBullets(cells[0]));
-      const rightRaw = normalizeWhitespace(extractCellTextPreservingBullets(cells[cells.length - 1]));
+      const left = normalizeWhitespace(extractCellTextPreservingOrder(cells[0]));
+      const rightRaw = normalizeWhitespace(extractCellTextPreservingOrder(cells[cells.length - 1]));
 
       // skip obvious header row
       if (/zeitraum/i.test(left) && /tätigkeitsbeschreibung|projekthistorie|projekte/i.test(rightRaw)) continue;
@@ -351,104 +342,137 @@ function splitProjectRightColumn(right: string): {
   responsibilitiesTitle: string;
   bullets: string[];
 } {
-  const lines = right.split("\n").map(l => l.trim()).filter(Boolean);
+  const lines = right.split('\n').map(l => l.trim()).filter(Boolean);
 
-  let company = '';
-  let headline = '';
-  const descLines: string[] = [];
-  const bullets: string[] = [];
+  let company = lines[0] || '';
+  let headline = lines[1] || '';
+
+  // Find “Verantwortlichkeiten:” even if it’s like “Verantwortlichkeiten :”
+  const respIdx = findIndexRegex(lines, /^verantwortlichkeiten\b\s*:?\s*$/i);
+
+  // Find first bullet line index (even without responsibilities title)
+  const firstBulletIdx = findIndexRegex(lines, /^[•\-\u2022]\s+/);
+
+  // Decide where description stops
+  let descEnd = lines.length;
   let responsibilitiesTitle = 'Verantwortlichkeiten:';
 
-  // Heuristics that match your screenshot layout:
-  // 1) company
-  // 2) headline (role | project)
-  // 3) description paragraphs until "Verantwortlichkeiten:"
-  // 4) bullet lines after that
-  company = lines[0] || '';
-  headline = lines[1] || '';
-
-  // If description got glued into the headline line, split it out
-  if (/projekt/i.test(headline) && descLines.length === 0) {
-    const mGlue = headline.match(/^(.*?projekt[^A-Za-z]*)(.+)$/i);
-    if (mGlue && mGlue[1] && mGlue[2]) {
-      headline = mGlue[1].trim();
-      descLines.push(mGlue[2].trim());
-    }
-  }
-
-  let i = 2;
-  const respIdx = lines.findIndex(l => /^verantwortlichkeiten\s*:?\s*$/i.test(l));
-  const stopAt = respIdx >= 0 ? respIdx : lines.length;
-
-  for (; i < stopAt; i++) descLines.push(lines[i]);
-
   if (respIdx >= 0) {
-    responsibilitiesTitle = lines[respIdx].replace(/\s*:\s*$/, ':') || 'Verantwortlichkeiten:';
-    i = respIdx + 1;
+    responsibilitiesTitle = (lines[respIdx] || 'Verantwortlichkeiten:').replace(/\s*:\s*$/, ':');
+    descEnd = respIdx;
+  } else if (firstBulletIdx >= 0) {
+    // no explicit label, but bullets exist: description ends before first bullet
+    descEnd = firstBulletIdx;
   }
+
+  // Description: between headline and responsibilities/bullets
+  const descLines: string[] = [];
+  for (let i = 2; i < descEnd; i++) descLines.push(lines[i]);
+
+  // Bullets: after responsibilities label, OR from first bullet onward
+  const bullets: string[] = [];
+  let i = respIdx >= 0 ? respIdx + 1 : (firstBulletIdx >= 0 ? firstBulletIdx : lines.length);
 
   for (; i < lines.length; i++) {
     const l = lines[i];
 
-    // Split any line that contains multiple bullet markers into individual bullets
-    const splitBullets = l.split(/[\u2022\u0007]/).map(x => x.trim()).filter(Boolean);
-    if (splitBullets.length > 1) {
-      for (const b of splitBullets) bullets.push(b);
-      continue;
-    }
-
-    // Detect a single bullet line (bullet or - at start)
-    const m = l.match(/^[\u2022\u0007\-]\s*(.+)$/);
+    const m = l.match(/^[•\-\u2022]\s*(.+)$/);
     if (m) {
       bullets.push(m[1].trim());
       continue;
     }
 
-    if (bullets.length) bullets.push(l.trim());
+    // continuation line: append to previous bullet
+    if (bullets.length) {
+      bullets[bullets.length - 1] = `${bullets[bullets.length - 1]} ${l}`.trim();
+    }
   }
 
-  const description = descLines.join('\n').trim();
+  // If company/headline are missing because the source had fewer lines, degrade gracefully
+  if (!headline && descLines.length) {
+    headline = descLines.shift() || '';
+  }
 
   return {
     company: company.trim(),
     headline: headline.trim(),
-    description,
+    description: descLines.join('\n').trim(),
     responsibilitiesTitle,
     bullets: bullets.filter(Boolean)
   };
 }
-function extractCellTextPreservingBullets(cell: HTMLTableCellElement): string {
-  const lines: string[] = [];
 
-  const addLine = (txt: string) => {
+function findIndexRegex(arr: string[], re: RegExp): number {
+  for (let i = 0; i < arr.length; i++) if (re.test(arr[i])) return i;
+  return -1;
+}
+
+// IMPORTANT: preserve DOM order (so description + bullets don’t get scrambled)
+function extractCellTextPreservingOrder(cell: HTMLTableCellElement): string {
+  const out: string[] = [];
+
+  const push = (txt: string) => {
     const t = normalizeWhitespace(txt);
     if (!t) return;
-    if (lines.length && lines[lines.length - 1] === t) return;
-    lines.push(t);
+    if (out.length && out[out.length - 1] === t) return;
+    out.push(t);
   };
 
-  // Walk DOM in order so we keep the original sequence (heading, headline, desc, then bullets)
-  const walk = (el: Element) => {
-    const tag = (el.tagName || '').toLowerCase();
-
-    if (tag === 'li') {
-      addLine(`• ${(el.textContent || '').trim()}`);
-      return; // already captured the bullet text
-    }
-
-    if (tag === 'p' || tag === 'div') {
-      if (!el.closest('li')) addLine(el.textContent || '');
+  const walk = (node: Node) => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      push(node.textContent || '');
       return;
     }
 
-    for (const child of Array.from(el.children)) walk(child);
+    if (node.nodeType !== Node.ELEMENT_NODE) return;
+    const el = node as HTMLElement;
+    const tag = (el.tagName || '').toLowerCase();
+
+    if (tag === 'br') {
+      push('\n');
+      return;
+    }
+
+    if (tag === 'li') {
+      const txt = (el.textContent || '').trim();
+      if (txt) push(`• ${txt}`);
+      return;
+    }
+
+    if (tag === 'ul' || tag === 'ol') {
+      // walk only direct li children in order
+      const lis = Array.from(el.children).filter(c => (c as HTMLElement).tagName?.toLowerCase() === 'li');
+      for (const li of lis) walk(li);
+      return;
+    }
+
+    if (tag === 'p' || tag === 'div') {
+      // walk children then force a line break boundary
+      const kids = Array.from(el.childNodes);
+      for (const k of kids) walk(k);
+      // ensure paragraph boundary
+      push('\n');
+      return;
+    }
+
+    // generic: keep order
+    const kids = Array.from(el.childNodes);
+    for (const k of kids) walk(k);
   };
-  walk(cell);
 
-  if (!lines.length) addLine(cell.textContent || '');
+  const kids = Array.from(cell.childNodes);
+  if (kids.length) {
+    for (const k of kids) walk(k);
+  } else {
+    push(cell.textContent || '');
+  }
 
-  return lines.join('\n').trim();
+  return out
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
 }
+
 function normalizeWhitespace(s: string): string {
   return (s || '')
     .replace(/\u00A0/g, ' ')
@@ -526,21 +550,16 @@ function extractFirstPhotoFromDocx(buffer: ArrayBuffer): { photoBytes?: Uint8Arr
   try {
     const zip = new PizZip(buffer as any);
     const files = Object.keys(zip.files || {}).filter(p => /^word\/media\//i.test(p) && !zip.files[p].dir);
-
     if (!files.length) return {};
 
-    // prefer common photo formats
-    const ordered = files
-      .filter(f => /\.(png|jpe?g)$/i.test(f))
-      .sort((a, b) => a.localeCompare(b));
-
+    const ordered = files.filter(f => /\.(png|jpe?g)$/i.test(f)).sort((a, b) => a.localeCompare(b));
     const pick = ordered[0] || files[0];
+
     const u8 = zip.file(pick)?.asUint8Array?.();
     if (!u8 || !u8.length) return {};
 
     const extMatch = pick.match(/\.(png|jpe?g)$/i);
     const photoExt = extMatch ? extMatch[1].toLowerCase() : 'png';
-
     return { photoBytes: u8, photoExt };
   } catch {
     return {};
@@ -572,22 +591,22 @@ export async function fillDataportTemplate(
     : computeBerufserfahrungFromProjects(d.projects || []);
 
   const projects = (d.projects || []).length
-  ? d.projects.map(p => ({
-      period: v(p.period),
-      company: v(p.company),
-      headline: v(p.headline),
-      description: v(p.description),
-      responsibilitiesTitle: v(p.responsibilitiesTitle || 'Verantwortlichkeiten:'),
-      bullets: (p.bullets && p.bullets.length) ? p.bullets : [MISSING_TOKEN]
-    }))
-  : [{
-      period: MISSING_TOKEN,
-      company: MISSING_TOKEN,
-      headline: MISSING_TOKEN,
-      description: MISSING_TOKEN,
-      responsibilitiesTitle: 'Verantwortlichkeiten:',
-      bullets: [MISSING_TOKEN]
-    }];
+    ? d.projects.map(p => ({
+        period: v(p.period),
+        company: v(p.company),
+        headline: v(p.headline),
+        description: v(p.description),
+        responsibilitiesTitle: v(p.responsibilitiesTitle || 'Verantwortlichkeiten:'),
+        bullets: (p.bullets && p.bullets.length) ? p.bullets : [MISSING_TOKEN]
+      }))
+    : [{
+        period: MISSING_TOKEN,
+        company: MISSING_TOKEN,
+        headline: MISSING_TOKEN,
+        description: MISSING_TOKEN,
+        responsibilitiesTitle: 'Verantwortlichkeiten:',
+        bullets: [MISSING_TOKEN]
+      }];
 
   const model: any = {
     profilnummer: v(d.profilnummer),
@@ -634,16 +653,15 @@ export async function fillDataportTemplate(
     throw err;
   }
 
-  // Highlight missing tokens AND literal "anpassen"
+  // Ensure both generated tokens and literal "anpassen" are yellow
   highlightAndReplaceInZip(doc.getZip(), MISSING_TOKEN, 'anpassen');
   highlightLiteralInZip(doc.getZip(), 'anpassen');
 
-  // Copy photo if possible
+  // Copy photo into the first embedded image in the body
   if (d.photoBytes && d.photoBytes.length) {
     try {
       await replaceFirstBodyImageWithSourcePhoto(doc.getZip(), d.photoBytes, d.photoExt || '');
     } catch (e) {
-      // don’t fail export because of photo
       console.warn('Photo copy failed (ignored):', e);
     }
   }
@@ -663,17 +681,12 @@ function sanitizeDocxtemplaterZip(zip: any) {
     let xml = f.asText();
 
     xml = xml.replace(/<w:proofErr\b[^\/]*\/>/g, '');
-
-    // {%photo} -> {photo}
     xml = xml.replace(/\{%\s*photo\s*\}/g, '{photo}');
-
-    // {{var}} -> {var}
     xml = xml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, '{$1}');
 
-    // Fix common wrong current-item placeholder "{$.}" -> "{.}"
+    // fix Word-created wrong placeholder in loops: "{$.}" -> "{.}"
     xml = xml.replace(/\{\s*\$\s*\.\s*\}/g, '{.}');
 
-    // Repair split tags across runs
     xml = repairSplitTagsInTextRuns(xml);
 
     zip.file(part, xml);
@@ -732,12 +745,10 @@ function repairSplitTagsInTextRuns(xml: string): string {
   return out;
 }
 
-// Replace token with replacement and highlight those runs
 function highlightAndReplaceInZip(zip: any, token: string, replacement: string) {
   const xmlParts = Object.keys(zip.files).filter(p =>
     /^word\/(document|header\d+|footer\d+)\.xml$/i.test(p)
   );
-
   const tokenRe = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
 
   for (const part of xmlParts) {
@@ -754,22 +765,22 @@ function highlightAndReplaceInZip(zip: any, token: string, replacement: string) 
       if (/<w:highlight\b/i.test(updated)) return updated;
 
       if (/<w:rPr[\s>]/i.test(updated)) {
-        updated = updated.replace(/<w:rPr[^>]*>/i, (m0: string) => `${m0}<w:highlight w:val="yellow"/>`);
-        return updated;
+        return updated.replace(/<w:rPr[^>]*>/i, (m0: string) => `${m0}<w:highlight w:val="yellow"/>`);
       }
-      updated = updated.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) => `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`);
-      return updated;
+      return updated.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) =>
+        `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`
+      );
     });
 
     zip.file(part, xml);
   }
 }
 
-// Highlight literal occurrences of "anpassen" (for template text that already says anpassen)
 function highlightLiteralInZip(zip: any, word: string) {
   const xmlParts = Object.keys(zip.files).filter(p =>
     /^word\/(document|header\d+|footer\d+)\.xml$/i.test(p)
   );
+
   for (const part of xmlParts) {
     const f = zip.file(part);
     if (!f) continue;
@@ -784,14 +795,15 @@ function highlightLiteralInZip(zip: any, word: string) {
       if (/<w:rPr[\s>]/i.test(runXml)) {
         return runXml.replace(/<w:rPr[^>]*>/i, (m0: string) => `${m0}<w:highlight w:val="yellow"/>`);
       }
-      return runXml.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) => `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`);
+      return runXml.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) =>
+        `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`
+      );
     });
 
     zip.file(part, xml);
   }
 }
 
-// Copy photo into the first image referenced by word/document.xml (not header/footer)
 async function replaceFirstBodyImageWithSourcePhoto(zip: any, photoBytes: Uint8Array, photoExt: string) {
   const docXmlFile = zip.file('word/document.xml');
   const relsFile = zip.file('word/_rels/document.xml.rels');
@@ -813,21 +825,17 @@ async function replaceFirstBodyImageWithSourcePhoto(zip: any, photoBytes: Uint8A
   const oldExtMatch = targetPath.match(/\.(png|jpe?g)$/i);
   const oldExt = oldExtMatch ? oldExtMatch[1].toLowerCase() : 'png';
 
-  // If source is jpeg and target is png (or vice versa), convert in-browser to match
   let finalBytes = photoBytes;
   if (oldExt !== (photoExt || '').toLowerCase()) {
-    // convert to the target ext if possible; default to png
-    const want = oldExt === 'jpg' || oldExt === 'jpeg' ? 'image/jpeg' : 'image/png';
+    const want = (oldExt === 'jpg' || oldExt === 'jpeg') ? 'image/jpeg' : 'image/png';
     finalBytes = await convertImageBytes(photoBytes, want);
   }
 
-  // overwrite the target image file
   zip.file(targetPath, finalBytes);
 }
 
 async function convertImageBytes(bytes: Uint8Array, mime: string): Promise<Uint8Array> {
-  // Browser-only conversion using canvas
-  const blob = new Blob([bytes], { type: guessMime(bytes) });
+  const blob = new Blob([bytes], { type: 'application/octet-stream' });
   const url = URL.createObjectURL(blob);
 
   try {
@@ -835,8 +843,10 @@ async function convertImageBytes(bytes: Uint8Array, mime: string): Promise<Uint8
     const canvas = document.createElement('canvas');
     canvas.width = img.width || 300;
     canvas.height = img.height || 300;
+
     const ctx = canvas.getContext('2d');
     if (!ctx) return bytes;
+
     ctx.drawImage(img, 0, 0);
 
     const outBlob: Blob = await new Promise((resolve) => {
@@ -859,11 +869,6 @@ function loadImage(url: string): Promise<HTMLImageElement> {
   });
 }
 
-function guessMime(_bytes: Uint8Array): string {
-  // best effort; docx photos usually render fine even if blob type is generic
-  return 'application/octet-stream';
-}
-
 export async function templateHasDocxtemplaterTags(
   spHttp: SPHttpClient,
   templateUrlOrServerRel: string
@@ -878,7 +883,7 @@ export async function templateHasDocxtemplaterTags(
   }
 }
 
-// ---------- Fallback (unchanged idea, not the focus now) ----------
+// ---------- Fallback ----------
 export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
   const heading = new DOCX.Paragraph({
     text: 'Datenblatt und Einschätzung zur Erbringung der Arbeitnehmerüberlassung',
@@ -896,58 +901,18 @@ export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
     ]
   });
 
-  const left: (DOCX.Paragraph | DOCX.Table)[] = [
-    new DOCX.Paragraph({ text: '' }),
-    new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: 'Foto', italics: true })] }),
-    new DOCX.Paragraph({ text: '' }),
-    new DOCX.Paragraph({ text: 'Fakten', heading: DOCX.HeadingLevel.HEADING_3 }),
-  ];
-
-  const projectsTable = new DOCX.Table({
-    width: { size: 100, type: DOCX.WidthType.PERCENTAGE },
-    rows: [
-      new DOCX.TableRow({
-        children: [
-          new DOCX.TableCell({ width: { size: 25, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold('Zeitraum')], margins: margins() }),
-          new DOCX.TableCell({ width: { size: 75, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold('Details')], margins: margins() })
-        ]
-      })
-    ]
-  });
-
-  const right: (DOCX.Paragraph | DOCX.Table)[] = [
-    new DOCX.Paragraph({ text: 'Kurzprofil', heading: DOCX.HeadingLevel.HEADING_2 }),
-    new DOCX.Paragraph({ text: data.summary || 'anpassen' }),
-    new DOCX.Paragraph({ text: '' }),
-    new DOCX.Paragraph({ text: 'Projekte / Referenzen', heading: DOCX.HeadingLevel.HEADING_2 }),
-    projectsTable
-  ];
-
-  const grid = new DOCX.Table({
-    width: { size: 100, type: DOCX.WidthType.PERCENTAGE },
-    rows: [
-      new DOCX.TableRow({
-        children: [
-          new DOCX.TableCell({ width: { size: 35, type: DOCX.WidthType.PERCENTAGE }, children: left }),
-          new DOCX.TableCell({ width: { size: 65, type: DOCX.WidthType.PERCENTAGE }, children: right })
-        ]
-      })
-    ]
-  });
-
-  const doc = new DOCX.Document({ sections: [{ children: [heading, summaryTable, new DOCX.Paragraph({ text: '' }), grid] }] });
+  const doc = new DOCX.Document({ sections: [{ children: [heading, summaryTable] }] });
   return DOCX.Packer.toBlob(doc);
 
   function row2(label: string, value: string): DOCX.TableRow {
     return new DOCX.TableRow({
       children: [
-        new DOCX.TableCell({ width: { size: 30, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold(label)], margins: margins() }),
-        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || 'anpassen' })] })], margins: margins() })
+        new DOCX.TableCell({ width: { size: 30, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold(label)] }),
+        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ text: value || 'anpassen' })] })
       ]
     });
   }
   function paraBold(text: string) { return new DOCX.Paragraph({ children: [new DOCX.TextRun({ text, bold: true })] }); }
-  function margins() { return { left: 120, right: 120, top: 80, bottom: 80 }; }
 }
 
 // ---------- Smart wrapper ----------
@@ -969,15 +934,3 @@ export async function tryGenerateDataportDoc(
 export function defaultTemplateUrl(): string {
   return `${BERATERPROFIL_SITE}/${LIB_INTERNAL_NAME}/Dataport CV Vorlage - TAGGED.docx`;
 }
-
-
-
-
-
-
-
-
-
-
-
-
