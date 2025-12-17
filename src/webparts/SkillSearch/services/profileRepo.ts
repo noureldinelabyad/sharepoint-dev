@@ -196,13 +196,16 @@ export async function resolveDataportTemplateUrl(
   personFolderUrl: string
 ): Promise<string | null> {
   const candidates = [
-    `${libRootUrl}/Dataport CV Vorlage.docx`,
+    // Prefer the person-scoped tagged template first so we keep per-profile formatting.
+    `${personFolderUrl}/Dataport CV Vorlage - TAGGED.docx`,
+    `${personFolderUrl}/Dataport CV Vorlage.docx`,
+    `${personFolderUrl}/Dataport_CV_Vorlage.docx`,
+
+    // Fall back to library-level tagged/default variants.
     `${libRootUrl}/Dataport CV Vorlage - TAGGED.docx`,
+    `${libRootUrl}/Dataport CV Vorlage.docx`,
     `${libRootUrl}/Dataport_CV_Vorlage.docx`,
     `${libRootUrl}/Dataport-CV-Vorlage.docx`,
-    `${personFolderUrl}/Dataport CV Vorlage.docx`,
-    `${personFolderUrl}/Dataport CV Vorlage - TAGGED.docx`,
-    `${personFolderUrl}/Dataport_CV_Vorlage.docx`,
   ];
 
   // Check sequentially (keeps request count low); uses existsCache internally.

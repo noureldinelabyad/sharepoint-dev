@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
+﻿/* eslint-disable @typescript-eslint/no-explicit-any */
 import { SPHttpClient } from '@microsoft/sp-http';
 import PizZip from 'pizzip';
 import Docxtemplater from 'docxtemplater';
@@ -10,12 +10,26 @@ export interface ProjectItem {
   from?: string;
   to?: string;
   period?: string;
+
+  // structured (used by the template)
+  company?: string;
+  headline?: string;
+  description?: string;
+  responsibilitiesTitle?: string;
+  bullets?: string[];
+
+  // keep legacy fields (not used in the new “copy/paste” approach but kept for compatibility)
   title?: string;
   rolle: string;
   kunde: string;
   taetigkeiten: string[];
   technologien: string[];
+
+  // raw text (optional debug / fallback)
+  //details?: string;
 }
+
+export interface SkillGroup { category: string; items: string[]; }
 
 export interface ProfileData {
   name: string;
@@ -25,6 +39,7 @@ export interface ProfileData {
   skills: string[];
   summary: string;
   projects: ProjectItem[];
+  skillGroups?: SkillGroup[];
 
   // Optional extras your template may use
   firstName?: string;
@@ -39,7 +54,14 @@ export interface ProfileData {
   berufserfahrung?: string;
   education?: string;
   profilnummer?: string;
+
+  // NEW: photo extraction from source docx
+  photoBytes?: Uint8Array;
+  photoExt?: string; // "png" | "jpg" | "jpeg" | ...
 }
+
+// ---------- Constants ----------
+const MISSING_TOKEN = '__ANPASSEN__';
 
 // ---------- Binary download ----------
 export async function downloadArrayBuffer(spHttp: SPHttpClient, urlOrServerRel: string): Promise<ArrayBuffer> {
@@ -67,6 +89,9 @@ export async function downloadArrayBuffer(spHttp: SPHttpClient, urlOrServerRel: 
 
 // ---------- Parse Beraterprofil ----------
 export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<ProfileData> {
+  // Extract photo bytes from the *source* docx (if any)
+  const { photoBytes, photoExt } = extractFirstPhotoFromDocx(buffer);
+
   const mammoth: any = await import('mammoth/mammoth.browser');
   const { value: html } = await mammoth.convertToHtml({ arrayBuffer: buffer });
   const htmlDoc = new DOMParser().parseFromString(html, 'text/html');
@@ -75,24 +100,35 @@ export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<P
   const getText = (el?: Element | null) => (el && el.textContent ? el.textContent : '').trim();
   const textLines = paras.map(p => getText(p)).filter(Boolean);
 
-  // 0) collect tables into key-value pairs for top metadata
+  // 0) collect tables into key-value pairs (top metadata)
   const tablePairs: Record<string, string> = {};
   const allTables = Array.from(htmlDoc.getElementsByTagName('table')) as HTMLTableElement[];
   for (const t of allTables) {
     for (const tr of Array.from(t.rows) as HTMLTableRowElement[]) {
-      const cells = Array.from(tr.cells) as HTMLTableCellElement[];
-      if (cells.length >= 2) {
-        const k = getText(cells[0]).toLowerCase();
-        const v = getText(cells[1]);
-        if (k && v) tablePairs[k] = v;
-      }
+      const rawCells = Array.from(tr.cells)
+        .map(td => getText(td).replace(/\s+/g, ' ').trim())
+        .filter(c => c !== '');
+      if (rawCells.length < 2) continue;
+
+      const uniq: string[] = [];
+      for (const c of rawCells) if (!uniq.includes(c)) uniq.push(c);
+
+      const key = (uniq[0] || '').replace(/:$/, '').toLowerCase();
+      const value = uniq[uniq.length - 1] || '';
+
+      if (key && value && key !== value) tablePairs[key] = value;
     }
   }
 
   const firstName = tablePairs['vorname'] || '';
   const lastName  = tablePairs['name'] || '';
   const birthYear = tablePairs['geburtsjahr'] || '';
-  const availableFrom = tablePairs['verfügbar ab'] || tablePairs['verfugbar ab'] || '';
+  const availableFrom =
+    tablePairs['verfügbar ab'] ||
+    tablePairs['verfuegbar ab'] ||
+    tablePairs['verfugbar ab'] ||
+    tablePairs['verfÇ¬gbar ab'] ||
+    '';
   const education = tablePairs['ausbildung'] || '';
 
   const name = firstName && lastName ? `${firstName} ${lastName}` : findAfterLabel(/Name/i);
@@ -104,7 +140,7 @@ export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<P
     return href ? href.replace(/^mailto:/i, '') : '';
   })();
 
-  // 1) summary (strip obvious label rows if they leaked in)
+  // 1) summary
   const rawSummary = grabBetween(
     /Zu meiner Person|Kurzprofil|Profil/i,
     /Kompetenzen|Skills|Kenntnisse|Zeitraum|Projekte|Tätigkeitsbeschreibung/i,
@@ -116,29 +152,38 @@ export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<P
     .join('\n')
     .trim();
 
-  // 2) skills: UL after heading; else table after heading; else paragraph block
-  const skills = extractSkills(htmlDoc, textLines);
+  // 2) skills
+  const { flatSkills, skillGroups } = extractSkills(htmlDoc);
 
-  // 3) projects: table flavour or free-text flavour
-  const projects = parseProjects(htmlDoc, textLines);
+  // 3) projects: read 2-column table and structure right side into bullets, etc.
+  const projects = parseProjectsCopyPaste(htmlDoc);
+
+  // 4) languages
+  const languages = extractLanguages(allTables, textLines);
+
+  // 5) berufserfahrung
+  const berufserfahrung = computeBerufserfahrungFromProjects(projects);
 
   return {
     name: name || '',
     role: role || '',
     team: team || '',
     email,
-    skills,
+    skills: flatSkills,
+    skillGroups,
     summary,
     projects,
     firstName, lastName, birthYear, availableFrom,
     einsatzAls: role || '',
     einsatzIn: '',
-    languages: extractLanguages(allTables),
+    languages,
     branchen: [],
     qualifikationen: [],
-    berufserfahrung: '',
+    berufserfahrung,
     education,
-    profilnummer: ''
+    profilnummer: '',
+    photoBytes,
+    photoExt
   };
 
   function findAfterLabel(re: RegExp): string {
@@ -146,24 +191,6 @@ export async function extractProfileDataFromDocx(buffer: ArrayBuffer): Promise<P
     const next = p ? (p.nextElementSibling as HTMLElement | null) : null;
     return getText(next) || getText(p);
   }
-}
-
-function extractLanguages(tables: HTMLTableElement[]): string[] {
-  const res: string[] = [];
-  for (const t of tables) {
-    const txt = (t.textContent || '');
-    if (/Sprachen/i.test(txt) && /Niveau/i.test(txt)) {
-      const rows = Array.from(t.rows).slice(1);
-      for (const tr of rows) {
-        const cells = Array.from(tr.cells);
-        if (cells[0]) {
-          const lang = (cells[0].textContent || '').trim();
-          if (lang) res.push(lang);
-        }
-      }
-    }
-  }
-  return res;
 }
 
 function grabBetween(start: RegExp, end: RegExp, paras: HTMLParagraphElement[]): string {
@@ -175,134 +202,349 @@ function grabBetween(start: RegExp, end: RegExp, paras: HTMLParagraphElement[]):
   return slice.join('\n').trim();
 }
 
-function extractSkills(htmlDoc: Document, allLines: string[]): string[] {
-  // UL after heading
-  const elems = Array.from(htmlDoc.querySelectorAll('p,strong,h1,h2,h3')) as HTMLElement[];
-  const probe = elems.find(e => /Kompetenzen|Skills|Kenntnisse/i.test((e.textContent || '').trim()));
-  const next = probe ? (probe.nextElementSibling as HTMLElement | null) : null;
-  const ul = next && next.tagName === 'UL'
-    ? next
-    : (probe && probe.parentElement ? (probe.parentElement.querySelector('ul') as HTMLElement | null) : null);
-  if (ul) {
-    return Array.from(ul.querySelectorAll('li')).map(li => (li.textContent || '').trim()).filter(Boolean);
-  }
+// ---------- Skills ----------
+function extractSkills(htmlDoc: Document): { flatSkills: string[]; skillGroups: SkillGroup[] } {
+  const tables = Array.from(htmlDoc.getElementsByTagName('table')) as HTMLTableElement[];
 
-  // Table after heading -> take all cell values as flat list
-  const followingTable = probe
-    ? (probe.nextElementSibling?.tagName === 'TABLE'
-        ? (probe.nextElementSibling as HTMLTableElement)
-        : (probe.parentElement?.querySelector('table') as HTMLTableElement | null))
-    : null;
-  if (followingTable) {
-    const set = new Set<string>();
-    for (const tr of Array.from(followingTable.rows)) {
-      for (const td of Array.from(tr.cells)) {
-        const t = (td.textContent || '').trim();
-        if (t) set.add(t);
-      }
+  for (const t of tables) {
+    const header = Array.from(t.rows && t.rows[0] ? t.rows[0].cells : [])
+      .map(c => (c.textContent || '').trim().toLowerCase());
+
+    if (!header.some(h => h.includes('beschreibung'))) continue;
+
+    const groups: SkillGroup[] = [];
+    for (const tr of Array.from(t.rows).slice(1)) {
+      const cells = Array.from(tr.cells)
+        .map(td => (td.textContent || '').replace(/\s+/g, ' ').trim())
+        .filter(Boolean);
+
+      if (cells.length < 2) continue;
+
+      const category = cells[0];
+      const items = cells[1].split(/,\s*/).map(x => x.trim()).filter(Boolean);
+      if (category && items.length) groups.push({ category, items });
     }
-    return Array.from(set);
+
+    const flat = groups.reduce((acc: string[], g: SkillGroup) => {
+      acc.push(g.category);
+      for (const it of g.items) acc.push(it);
+      return acc;
+    }, []);
+
+    return { flatSkills: flat, skillGroups: groups };
   }
 
-  // Paragraph block fallback
-  const idx = allLines.findIndex(l => /Kompetenzen|Skills|Kenntnisse/i.test(l));
-  if (idx >= 0) {
-    const rest = allLines.slice(idx + 1);
-    const stop = rest.findIndex(l => /Projekte|Tätigkeitsbeschreibung|Zeitraum|Sprachen/i.test(l));
-    const block = stop >= 0 ? rest.slice(0, stop) : rest;
-    return block
-      .join('\n')
-      .split(/[,;\n•]/)
-      .map(s => s.trim())
-      .filter(Boolean);
+  return { flatSkills: [], skillGroups: [] };
+}
+
+// ---------- Languages ----------
+function extractLanguages(tables: HTMLTableElement[], lines: string[]): string[] {
+  for (const t of tables) {
+    const headerCells = Array.from(t.rows && t.rows[0] ? t.rows[0].cells : [])
+      .map(c => (c.textContent || '').trim().toLowerCase());
+
+    const isLangTable = headerCells.some(h => h.includes('sprachen')) && headerCells.some(h => h.includes('niveau'));
+    if (!isLangTable) continue;
+
+    const res: string[] = [];
+    for (const tr of Array.from(t.rows).slice(1)) {
+      const lang = (tr.cells && tr.cells[0] ? tr.cells[0].textContent : '') || '';
+      const level = (tr.cells && tr.cells[1] ? tr.cells[1].textContent : '') || '';
+      const l = lang.trim();
+      const lv = level.trim();
+      if (l) res.push(lv ? `${l} (${lv})` : l);
+    }
+    return uniqueKeepOrder(res);
   }
+
+  const idx = lines.findIndex(l => /^sprachen\b/i.test(l) || /\bsprachen\b/i.test(l));
+  if (idx >= 0) {
+    const out: string[] = [];
+    const firstLine = lines[idx];
+    const after = firstLine.replace(/^.*?\bsprachen\b\s*:?\s*/i, '').trim();
+    if (after) out.push(...splitToItems(after));
+
+    const stopRe = /(kompetenzen|skills|kenntnisse|projekte|projektreferenzen|tätigkeitsbeschreibung|ausbildung|zertifikat|branchen|qualifikationen)/i;
+    for (let i = idx + 1; i < lines.length; i++) {
+      const l = (lines[i] || '').trim();
+      if (!l) break;
+      if (stopRe.test(l)) break;
+      out.push(...splitToItems(l));
+    }
+    return uniqueKeepOrder(out).filter(Boolean);
+  }
+
   return [];
 }
 
-function parseProjects(htmlDoc: Document, lines: string[]): ProjectItem[] {
-  // 1) Table flavour
-  const tables = Array.from(htmlDoc.getElementsByTagName('table')) as HTMLTableElement[];
-  for (const t of tables) {
-    const txt = t.textContent || '';
-    if (/Kunde|Branche/i.test(txt) && /Tätigkeiten|Taetigkeiten/i.test(txt)) {
-      const rows = Array.from(t.rows).slice(1) as HTMLTableRowElement[];
-      const arr = rows.map(tr => {
-        const tds = Array.from(tr.cells).map(td => (td.textContent || '').trim());
-        return {
-          kunde: tds[0] || '',
-          rolle: tds[1] || '',
-          taetigkeiten: splitList(tds[2] || ''),
-          technologien: splitList(tds[3] || '')
-        } as ProjectItem;
-      });
-      if (arr.length) return arr;
-    }
-  }
+function splitToItems(s: string): string[] {
+  return s.split(/[,;•\n]/).map(x => x.trim()).filter(Boolean);
+}
 
-  // 2) Free-text flavour — capture date + inline title on same line
-  const out: ProjectItem[] = [];
-  const startIdx = lines.findIndex(l => /Projektreferenzen|Tätigkeitsbeschreibung|Projekthistorie/i.test(l));
-  if (startIdx < 0) return out;
-
-  let i = startIdx + 1;
-  const dateRe = /^(seit\s*)?(\d{2}[./-]\d{4}|\d{4})(?:\s*[–-]\s*(heute|\d{2}[./-]\d{4}|\d{4}))?(.*)$/i;
-
-  while (i < lines.length) {
-    const line = lines[i].trim();
-    const m = line.match(dateRe);
-    if (!m) { i++; continue; }
-
-    const from = m[2] || '';
-    let to = (m[3] || '').toLowerCase();
-    if (!to && /^seit/i.test(line)) to = 'heute';
-
-    const inlineTitle = (m[4] || '').trim(); // e.g. "Migration Microsoft 365"
-    const period = [from, to].filter(Boolean).join(' – ') || from;
-
-    // next non-empty -> kunde/branch or role/title if formatted that way
-    i++;
-    while (i < lines.length && !lines[i].trim()) i++;
-    let kunde = (lines[i] || '').trim();
-
-    // If the next line is like "Rolle: X" or "Kunde/Branche: Y", capture properly
-    let rolle = '';
-    let title = inlineTitle;
-    const details: string[] = [];
-    i++;
-
-    while (i < lines.length) {
-      const l = lines[i].trim();
-      if (dateRe.test(l)) break; // next project
-
-      if (/^Rolle\s*:/.test(l)) { rolle = l.replace(/^Rolle\s*:/, '').trim(); i++; continue; }
-      if (/^Kunde\/?Branche\s*:/.test(l)) { kunde = l.replace(/^Kunde\/?Branche\s*:/, '').trim(); i++; continue; }
-
-      details.push(l);
-      i++;
-    }
-
-    // Tätigkeiten block detection
-    const tasks: string[] = [];
-    const idxV = details.findIndex(l => /Verantwortlichkeiten|Tätigkeiten/i.test(l));
-    if (idxV > -1) {
-      for (const l of details.slice(idxV + 1)) {
-        if (!l.trim()) break;
-        tasks.push(l.replace(/^[•\-\u2022]\s*/, '').trim());
-      }
-    }
-
-    // Technologies guess
-    const techs: string[] = [];
-    const techLine = details.slice().reverse().find(l => /,/.test(l) || /(mit|via|unter Nutzung von)/i.test(l));
-    if (techLine) techs.push(...splitList(techLine));
-
-    out.push({ from, to, period, title, rolle, kunde, taetigkeiten: tasks, technologien: techs });
+function uniqueKeepOrder(arr: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const v of arr) {
+    const k = v.trim();
+    if (!k) continue;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    out.push(k);
   }
   return out;
 }
 
-function splitList(s: string): string[] {
-  return s.split(/[,;•\n]/).map(x => x.trim()).filter(Boolean);
+// ---------- Projects: 2-column copy/paste parsing ----------
+function parseProjectsCopyPaste(htmlDoc: Document): ProjectItem[] {
+  const tables = Array.from(htmlDoc.getElementsByTagName('table')) as HTMLTableElement[];
+
+  const periodRe =
+    /^\s*(seit\s*)?(\d{1,2}\s*[./&-]\s*\d{4}|\d{4})(\s*[–-]\s*(heute|\d{1,2}\s*[./&-]\s*\d{4}|\d{4}))?/i;
+
+  for (const t of tables) {
+    const rows = Array.from(t.rows) as HTMLTableRowElement[];
+    if (!rows.length) continue;
+
+    const out: ProjectItem[] = [];
+
+    for (const tr of rows) {
+      const cells = Array.from(tr.cells);
+      if (cells.length < 2) continue;
+
+      const left = normalizeWhitespace(extractCellTextPreservingBullets(cells[0]));
+      const rightRaw = normalizeWhitespace(extractCellTextPreservingBullets(cells[cells.length - 1]));
+
+      // skip obvious header row
+      if (/zeitraum/i.test(left) && /tätigkeitsbeschreibung|projekthistorie|projekte/i.test(rightRaw)) continue;
+      if (!left || !rightRaw) continue;
+      if (!periodRe.test(left)) continue;
+
+      const parsed = splitProjectRightColumn(rightRaw);
+
+      out.push({
+        period: left,
+
+        company: parsed.company,
+        headline: parsed.headline,
+        description: parsed.description,
+        responsibilitiesTitle: parsed.responsibilitiesTitle,
+        bullets: parsed.bullets,
+
+        // keep compat fields (empty, but required by your interface)
+        rolle: '',
+        kunde: '',
+        taetigkeiten: [],
+        technologien: []
+      });
+    }
+
+    if (out.length) return out;
+  }
+
+  return [];
+}
+
+function splitProjectRightColumn(right: string): {
+  company: string;
+  headline: string;
+  description: string;
+  responsibilitiesTitle: string;
+  bullets: string[];
+} {
+  const lines = right.split("\n").map(l => l.trim()).filter(Boolean);
+
+  let company = '';
+  let headline = '';
+  const descLines: string[] = [];
+  const bullets: string[] = [];
+  let responsibilitiesTitle = 'Verantwortlichkeiten:';
+
+  // Heuristics that match your screenshot layout:
+  // 1) company
+  // 2) headline (role | project)
+  // 3) description paragraphs until "Verantwortlichkeiten:"
+  // 4) bullet lines after that
+  company = lines[0] || '';
+  headline = lines[1] || '';
+
+  // If description got glued into the headline line, split it out
+  if (/projekt/i.test(headline) && descLines.length === 0) {
+    const mGlue = headline.match(/^(.*?projekt[^A-Za-z]*)(.+)$/i);
+    if (mGlue && mGlue[1] && mGlue[2]) {
+      headline = mGlue[1].trim();
+      descLines.push(mGlue[2].trim());
+    }
+  }
+
+  let i = 2;
+  const respIdx = lines.findIndex(l => /^verantwortlichkeiten\s*:?\s*$/i.test(l));
+  const stopAt = respIdx >= 0 ? respIdx : lines.length;
+
+  for (; i < stopAt; i++) descLines.push(lines[i]);
+
+  if (respIdx >= 0) {
+    responsibilitiesTitle = lines[respIdx].replace(/\s*:\s*$/, ':') || 'Verantwortlichkeiten:';
+    i = respIdx + 1;
+  }
+
+  for (; i < lines.length; i++) {
+    const l = lines[i];
+
+    // Split any line that contains multiple bullet markers into individual bullets
+    const splitBullets = l.split(/[\u2022\u0007]/).map(x => x.trim()).filter(Boolean);
+    if (splitBullets.length > 1) {
+      for (const b of splitBullets) bullets.push(b);
+      continue;
+    }
+
+    // Detect a single bullet line (bullet or - at start)
+    const m = l.match(/^[\u2022\u0007\-]\s*(.+)$/);
+    if (m) {
+      bullets.push(m[1].trim());
+      continue;
+    }
+
+    if (bullets.length) bullets.push(l.trim());
+  }
+
+  const description = descLines.join('\n').trim();
+
+  return {
+    company: company.trim(),
+    headline: headline.trim(),
+    description,
+    responsibilitiesTitle,
+    bullets: bullets.filter(Boolean)
+  };
+}
+function extractCellTextPreservingBullets(cell: HTMLTableCellElement): string {
+  const lines: string[] = [];
+
+  const addLine = (txt: string) => {
+    const t = normalizeWhitespace(txt);
+    if (!t) return;
+    if (lines.length && lines[lines.length - 1] === t) return;
+    lines.push(t);
+  };
+
+  // Walk DOM in order so we keep the original sequence (heading, headline, desc, then bullets)
+  const walk = (el: Element) => {
+    const tag = (el.tagName || '').toLowerCase();
+
+    if (tag === 'li') {
+      addLine(`• ${(el.textContent || '').trim()}`);
+      return; // already captured the bullet text
+    }
+
+    if (tag === 'p' || tag === 'div') {
+      if (!el.closest('li')) addLine(el.textContent || '');
+      return;
+    }
+
+    for (const child of Array.from(el.children)) walk(child);
+  };
+  walk(cell);
+
+  if (!lines.length) addLine(cell.textContent || '');
+
+  return lines.join('\n').trim();
+}
+function normalizeWhitespace(s: string): string {
+  return (s || '')
+    .replace(/\u00A0/g, ' ')
+    .replace(/[ \t]+\n/g, '\n')
+    .replace(/\n[ \t]+/g, '\n')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}
+
+// ---------- Berufserfahrung ----------
+function computeBerufserfahrungFromProjects(projects: ProjectItem[]): string {
+  const starts: Date[] = [];
+  for (const p of projects) {
+    const dt = parseStartDateFromPeriod(p.period || '');
+    if (dt) starts.push(dt);
+  }
+  if (!starts.length) return '';
+
+  starts.sort((a, b) => a.getTime() - b.getTime());
+  const start = starts[0];
+  const now = new Date();
+  const months = (now.getFullYear() - start.getFullYear()) * 12 + (now.getMonth() - start.getMonth());
+  const years = Math.max(0, Math.floor(months / 12));
+
+  if (years <= 0) return '0 Jahre';
+  if (years === 1) return '1 Jahr';
+  return `${years} Jahre`;
+}
+
+function parseStartDateFromPeriod(period: string): Date | null {
+  const p = (period || '').replace(/&/g, '/').trim().toLowerCase();
+  if (!p) return null;
+
+  const seit = p.match(/seit\s*(\d{1,2}\s*[./-]\s*\d{4}|\d{4})/i);
+  if (seit) return parseMonthYearOrYear(seit[1]);
+
+  const mmyyyy = p.match(/(\d{1,2})\s*[./-]\s*(\d{4})/);
+  if (mmyyyy) {
+    const mm = clampInt(parseInt(mmyyyy[1], 10), 1, 12);
+    const yyyy = parseInt(mmyyyy[2], 10);
+    if (yyyy >= 1900 && yyyy <= 2100) return new Date(yyyy, mm - 1, 1);
+  }
+
+  const yyyyOnly = p.match(/(\d{4})/);
+  if (yyyyOnly) {
+    const yyyy = parseInt(yyyyOnly[1], 10);
+    if (yyyy >= 1900 && yyyy <= 2100) return new Date(yyyy, 0, 1);
+  }
+
+  return null;
+}
+
+function parseMonthYearOrYear(s: string): Date | null {
+  const t = (s || '').replace(/&/g, '/').trim();
+  const m = t.match(/(\d{1,2})\s*[./-]\s*(\d{4})/);
+  if (m) {
+    const mm = clampInt(parseInt(m[1], 10), 1, 12);
+    const yyyy = parseInt(m[2], 10);
+    if (yyyy >= 1900 && yyyy <= 2100) return new Date(yyyy, mm - 1, 1);
+  }
+  const y = t.match(/(\d{4})/);
+  if (y) {
+    const yyyy = parseInt(y[1], 10);
+    if (yyyy >= 1900 && yyyy <= 2100) return new Date(yyyy, 0, 1);
+  }
+  return null;
+}
+
+function clampInt(v: number, min: number, max: number): number {
+  return Math.max(min, Math.min(max, v));
+}
+
+// ---------- Photo extraction from source docx ----------
+function extractFirstPhotoFromDocx(buffer: ArrayBuffer): { photoBytes?: Uint8Array; photoExt?: string } {
+  try {
+    const zip = new PizZip(buffer as any);
+    const files = Object.keys(zip.files || {}).filter(p => /^word\/media\//i.test(p) && !zip.files[p].dir);
+
+    if (!files.length) return {};
+
+    // prefer common photo formats
+    const ordered = files
+      .filter(f => /\.(png|jpe?g)$/i.test(f))
+      .sort((a, b) => a.localeCompare(b));
+
+    const pick = ordered[0] || files[0];
+    const u8 = zip.file(pick)?.asUint8Array?.();
+    if (!u8 || !u8.length) return {};
+
+    const extMatch = pick.match(/\.(png|jpe?g)$/i);
+    const photoExt = extMatch ? extMatch[1].toLowerCase() : 'png';
+
+    return { photoBytes: u8, photoExt };
+  } catch {
+    return {};
+  }
 }
 
 // ---------- Docxtemplater path ----------
@@ -313,44 +555,313 @@ export async function fillDataportTemplate(
 ): Promise<Blob> {
   const buf = await downloadArrayBuffer(spHttp, templateUrlOrServerRel);
   const zip = new PizZip(buf);
-  const doc = new Docxtemplater(zip, { paragraphLoop: true, linebreaks: true, nullGetter: () => '' });
 
-  const model = {
-    profilnummer: d.profilnummer || '',
-    lastName: d.lastName || (d.name?.split(' ').slice(-1)[0] || ''),
-    firstName: d.firstName || (d.name?.split(' ').slice(0, -1).join(' ') || d.name || ''),
-    birthYear: d.birthYear || '',
-    availableFrom: d.availableFrom || '',
-    einsatzAls: d.einsatzAls || d.role || '',
-    einsatzIn: d.einsatzIn || '',
-    languages: d.languages || [],
-    branchen: d.branchen || [],
-    qualifikationen: d.qualifikationen || [],
-    berufserfahrung: d.berufserfahrung || '',
-    education: d.education || '',
+  sanitizeDocxtemplaterZip(zip);
 
-    name: d.name || '',
-    role: d.role || '',
-    team: d.team || '',
-    email: d.email || '',
-    summary: d.summary || '',
-    skills: d.skills || [],
+  const doc = new Docxtemplater(zip, {
+    paragraphLoop: true,
+    linebreaks: true,
+    nullGetter: () => MISSING_TOKEN
+  });
 
-    projects: (d.projects || []).map(p => ({
-      period: p.period || [p.from, p.to].filter(Boolean).join(' – '),
-      from: p.from || '',
-      to: p.to || '',
-      title: p.title || '',
-      rolle: p.rolle || '',
-      kunde: p.kunde || '',
-      taetigkeiten: p.taetigkeiten || [],
-      technologien: p.technologien || []
+  const v = (s?: string) => (s && s.trim() ? s.trim() : MISSING_TOKEN);
+  const arr = (a?: string[]) => (a && a.length ? a : [MISSING_TOKEN]);
+
+  const beruf = d.berufserfahrung && d.berufserfahrung.trim()
+    ? d.berufserfahrung.trim()
+    : computeBerufserfahrungFromProjects(d.projects || []);
+
+  const projects = (d.projects || []).length
+  ? d.projects.map(p => ({
+      period: v(p.period),
+      company: v(p.company),
+      headline: v(p.headline),
+      description: v(p.description),
+      responsibilitiesTitle: v(p.responsibilitiesTitle || 'Verantwortlichkeiten:'),
+      bullets: (p.bullets && p.bullets.length) ? p.bullets : [MISSING_TOKEN]
     }))
+  : [{
+      period: MISSING_TOKEN,
+      company: MISSING_TOKEN,
+      headline: MISSING_TOKEN,
+      description: MISSING_TOKEN,
+      responsibilitiesTitle: 'Verantwortlichkeiten:',
+      bullets: [MISSING_TOKEN]
+    }];
+
+  const model: any = {
+    profilnummer: v(d.profilnummer),
+    photo: '',
+
+    firstName: v(d.firstName || (d.name?.split(' ').slice(0, -1).join(' ') || d.name || '')),
+    lastName: v(d.lastName || (d.name?.split(' ').slice(-1)[0] || '')),
+    birthYear: v(d.birthYear),
+    availableFrom: v(d.availableFrom),
+    einsatzAls: v(d.einsatzAls || d.role || ''),
+    einsatzIn: v(d.einsatzIn),
+
+    languages: arr(d.languages),
+    languagesText: arr(d.languages).join('\n'),
+
+    branchen: arr(d.branchen),
+    branchenText: arr(d.branchen).join(', '),
+
+    qualifikationen: arr(d.qualifikationen),
+    qualifikationenText: arr(d.qualifikationen).join(', '),
+
+    education: v(d.education),
+    berufserfahrung: v(beruf),
+
+    name: v(d.name),
+    role: v(d.role),
+    team: v(d.team),
+    email: v(d.email),
+    summary: v(d.summary),
+
+    skills: arr(d.skills),
+    skillGroups: (d.skillGroups && d.skillGroups.length) ? d.skillGroups : [{ category: MISSING_TOKEN, items: [MISSING_TOKEN] }],
+
+    projects
   };
 
   doc.setData(model);
-  doc.render();
+
+  try {
+    doc.render();
+  } catch (err: any) {
+    console.error('Docxtemplater failed', err);
+    console.error('Details:', err?.properties?.errors ?? err?.properties);
+    throw err;
+  }
+
+  // Highlight missing tokens AND literal "anpassen"
+  highlightAndReplaceInZip(doc.getZip(), MISSING_TOKEN, 'anpassen');
+  highlightLiteralInZip(doc.getZip(), 'anpassen');
+
+  // Copy photo if possible
+  if (d.photoBytes && d.photoBytes.length) {
+    try {
+      await replaceFirstBodyImageWithSourcePhoto(doc.getZip(), d.photoBytes, d.photoExt || '');
+    } catch (e) {
+      // don’t fail export because of photo
+      console.warn('Photo copy failed (ignored):', e);
+    }
+  }
+
   return doc.getZip().generate({ type: 'blob' });
+}
+
+function sanitizeDocxtemplaterZip(zip: any) {
+  const xmlParts = Object.keys(zip.files).filter(p =>
+    /^word\/(document|header\d+|footer\d+)\.xml$/i.test(p)
+  );
+
+  for (const part of xmlParts) {
+    const f = zip.file(part);
+    if (!f) continue;
+
+    let xml = f.asText();
+
+    xml = xml.replace(/<w:proofErr\b[^\/]*\/>/g, '');
+
+    // {%photo} -> {photo}
+    xml = xml.replace(/\{%\s*photo\s*\}/g, '{photo}');
+
+    // {{var}} -> {var}
+    xml = xml.replace(/\{\{\s*([^}]+?)\s*\}\}/g, '{$1}');
+
+    // Fix common wrong current-item placeholder "{$.}" -> "{.}"
+    xml = xml.replace(/\{\s*\$\s*\.\s*\}/g, '{.}');
+
+    // Repair split tags across runs
+    xml = repairSplitTagsInTextRuns(xml);
+
+    zip.file(part, xml);
+  }
+}
+
+function repairSplitTagsInTextRuns(xml: string): string {
+  const re = /<w:t[^>]*>[\s\S]*?<\/w:t>/g;
+
+  const nodes: Array<{ start: number; end: number; whole: string; text: string }> = [];
+  let m: RegExpExecArray | null;
+
+  while ((m = re.exec(xml)) !== null) {
+    const whole = m[0];
+    const start = m.index || 0;
+    const end = start + whole.length;
+    const text = whole.replace(/^<w:t[^>]*>/, '').replace(/<\/w:t>$/, '');
+    nodes.push({ start, end, whole, text });
+  }
+
+  if (!nodes.length) return xml;
+
+  const texts = nodes.map(n => n.text);
+
+  for (let i = 0; i < texts.length; i++) {
+    const t = texts[i];
+    const openIdx = t.indexOf('{');
+    if (openIdx < 0) continue;
+    if (t.indexOf('}', openIdx + 1) >= 0) continue;
+
+    let merged = t;
+    for (let j = i + 1; j < texts.length; j++) {
+      const tj = texts[j];
+      const closeIdx = tj.indexOf('}');
+      if (closeIdx < 0) {
+        merged += tj;
+        texts[j] = '';
+        continue;
+      }
+      merged += tj.slice(0, closeIdx + 1);
+      texts[j] = tj.slice(closeIdx + 1);
+      break;
+    }
+    texts[i] = merged;
+  }
+
+  let out = '';
+  let cursor = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const n = nodes[i];
+    out += xml.slice(cursor, n.start);
+    out += n.whole.replace(n.text, texts[i]);
+    cursor = n.end;
+  }
+  out += xml.slice(cursor);
+  return out;
+}
+
+// Replace token with replacement and highlight those runs
+function highlightAndReplaceInZip(zip: any, token: string, replacement: string) {
+  const xmlParts = Object.keys(zip.files).filter(p =>
+    /^word\/(document|header\d+|footer\d+)\.xml$/i.test(p)
+  );
+
+  const tokenRe = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
+
+  for (const part of xmlParts) {
+    const f = zip.file(part);
+    if (!f) continue;
+
+    let xml = f.asText();
+    if (xml.indexOf(token) < 0) continue;
+
+    xml = xml.replace(/<w:r[\s\S]*?<\/w:r>/g, (runXml: string) => {
+      if (runXml.indexOf(token) < 0) return runXml;
+
+      let updated = runXml.replace(tokenRe, replacement);
+      if (/<w:highlight\b/i.test(updated)) return updated;
+
+      if (/<w:rPr[\s>]/i.test(updated)) {
+        updated = updated.replace(/<w:rPr[^>]*>/i, (m0: string) => `${m0}<w:highlight w:val="yellow"/>`);
+        return updated;
+      }
+      updated = updated.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) => `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`);
+      return updated;
+    });
+
+    zip.file(part, xml);
+  }
+}
+
+// Highlight literal occurrences of "anpassen" (for template text that already says anpassen)
+function highlightLiteralInZip(zip: any, word: string) {
+  const xmlParts = Object.keys(zip.files).filter(p =>
+    /^word\/(document|header\d+|footer\d+)\.xml$/i.test(p)
+  );
+  for (const part of xmlParts) {
+    const f = zip.file(part);
+    if (!f) continue;
+
+    let xml = f.asText();
+    if (xml.toLowerCase().indexOf(word.toLowerCase()) < 0) continue;
+
+    xml = xml.replace(/<w:r[\s\S]*?<\/w:r>/g, (runXml: string) => {
+      if (runXml.toLowerCase().indexOf(word.toLowerCase()) < 0) return runXml;
+      if (/<w:highlight\b/i.test(runXml)) return runXml;
+
+      if (/<w:rPr[\s>]/i.test(runXml)) {
+        return runXml.replace(/<w:rPr[^>]*>/i, (m0: string) => `${m0}<w:highlight w:val="yellow"/>`);
+      }
+      return runXml.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) => `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`);
+    });
+
+    zip.file(part, xml);
+  }
+}
+
+// Copy photo into the first image referenced by word/document.xml (not header/footer)
+async function replaceFirstBodyImageWithSourcePhoto(zip: any, photoBytes: Uint8Array, photoExt: string) {
+  const docXmlFile = zip.file('word/document.xml');
+  const relsFile = zip.file('word/_rels/document.xml.rels');
+  if (!docXmlFile || !relsFile) return;
+
+  const docXml = docXmlFile.asText();
+  const relsXml = relsFile.asText();
+
+  const ridMatch = docXml.match(/r:embed="(rId\d+)"/);
+  if (!ridMatch) return;
+
+  const rid = ridMatch[1];
+  const relRe = new RegExp(`<Relationship[^>]+Id="${rid}"[^>]+Target="([^"]+)"[^>]*/>`, 'i');
+  const relMatch = relsXml.match(relRe);
+  if (!relMatch) return;
+
+  const target = relMatch[1]; // e.g. "media/image2.png"
+  const targetPath = target.startsWith('word/') ? target : `word/${target.replace(/^\.?\//, '')}`;
+  const oldExtMatch = targetPath.match(/\.(png|jpe?g)$/i);
+  const oldExt = oldExtMatch ? oldExtMatch[1].toLowerCase() : 'png';
+
+  // If source is jpeg and target is png (or vice versa), convert in-browser to match
+  let finalBytes = photoBytes;
+  if (oldExt !== (photoExt || '').toLowerCase()) {
+    // convert to the target ext if possible; default to png
+    const want = oldExt === 'jpg' || oldExt === 'jpeg' ? 'image/jpeg' : 'image/png';
+    finalBytes = await convertImageBytes(photoBytes, want);
+  }
+
+  // overwrite the target image file
+  zip.file(targetPath, finalBytes);
+}
+
+async function convertImageBytes(bytes: Uint8Array, mime: string): Promise<Uint8Array> {
+  // Browser-only conversion using canvas
+  const blob = new Blob([bytes], { type: guessMime(bytes) });
+  const url = URL.createObjectURL(blob);
+
+  try {
+    const img = await loadImage(url);
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width || 300;
+    canvas.height = img.height || 300;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return bytes;
+    ctx.drawImage(img, 0, 0);
+
+    const outBlob: Blob = await new Promise((resolve) => {
+      canvas.toBlob((b) => resolve(b || blob), mime, 0.92);
+    });
+
+    const ab = await outBlob.arrayBuffer();
+    return new Uint8Array(ab);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
+function loadImage(url: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = (e) => reject(e);
+    img.src = url;
+  });
+}
+
+function guessMime(_bytes: Uint8Array): string {
+  // best effort; docx photos usually render fine even if blob type is generic
+  return 'application/octet-stream';
 }
 
 export async function templateHasDocxtemplaterTags(
@@ -361,13 +872,13 @@ export async function templateHasDocxtemplaterTags(
     const buf = await downloadArrayBuffer(spHttp, templateUrlOrServerRel);
     const zip = new PizZip(buf);
     const xml = zip.file('word/document.xml')?.asText() || '';
-    return /\{\{[^}]+\}\}/.test(xml) || /\{#.+?\}/.test(xml);
+    return /\{\{[^}]+\}\}/.test(xml) || /\{#.+?\}/.test(xml) || /\{\/.+?\}/.test(xml);
   } catch {
     return false;
   }
 }
 
-// ---------- Fallback: Dataport-like layout with projects table ----------
+// ---------- Fallback (unchanged idea, not the focus now) ----------
 export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
   const heading = new DOCX.Paragraph({
     text: 'Datenblatt und Einschätzung zur Erbringung der Arbeitnehmerüberlassung',
@@ -385,46 +896,28 @@ export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
     ]
   });
 
-  // Left column (photo placeholder + facts)
   const left: (DOCX.Paragraph | DOCX.Table)[] = [
     new DOCX.Paragraph({ text: '' }),
     new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: 'Foto', italics: true })] }),
     new DOCX.Paragraph({ text: '' }),
     new DOCX.Paragraph({ text: 'Fakten', heading: DOCX.HeadingLevel.HEADING_3 }),
-    ...paraIf('Verfügbar ab', data.availableFrom),
   ];
-  if (data.languages?.length) {
-    left.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: 'Sprachen', bold: true })] }));
-    left.push(...bullets(data.languages));
-  }
 
-  // Projects table with header row
-  const projectRows: DOCX.TableRow[] = [
-    new DOCX.TableRow({
-      children: [
-        new DOCX.TableCell({
-          width: { size: 25, type: DOCX.WidthType.PERCENTAGE },
-          children: [paraBold('Zeitraum')],
-          margins: margins()
-        }),
-        new DOCX.TableCell({
-          width: { size: 75, type: DOCX.WidthType.PERCENTAGE },
-          children: [paraBold('Details')],
-          margins: margins()
-        })
-      ]
-    }),
-    ...(data.projects?.length ? data.projects.map(p => projectRow(p)) : [projectRow({} as ProjectItem)])
-  ];
-  const projectsTable = new DOCX.Table({ width: { size: 100, type: DOCX.WidthType.PERCENTAGE }, rows: projectRows });
+  const projectsTable = new DOCX.Table({
+    width: { size: 100, type: DOCX.WidthType.PERCENTAGE },
+    rows: [
+      new DOCX.TableRow({
+        children: [
+          new DOCX.TableCell({ width: { size: 25, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold('Zeitraum')], margins: margins() }),
+          new DOCX.TableCell({ width: { size: 75, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold('Details')], margins: margins() })
+        ]
+      })
+    ]
+  });
 
-  // Right column (content)
   const right: (DOCX.Paragraph | DOCX.Table)[] = [
     new DOCX.Paragraph({ text: 'Kurzprofil', heading: DOCX.HeadingLevel.HEADING_2 }),
-    ...paraMultiline(data.summary || ''),
-    new DOCX.Paragraph({ text: '' }),
-    new DOCX.Paragraph({ text: 'Kompetenzen', heading: DOCX.HeadingLevel.HEADING_2 }),
-    ...(data.skills?.length ? bullets(data.skills) : [new DOCX.Paragraph({ text: '—' })]),
+    new DOCX.Paragraph({ text: data.summary || 'anpassen' }),
     new DOCX.Paragraph({ text: '' }),
     new DOCX.Paragraph({ text: 'Projekte / Referenzen', heading: DOCX.HeadingLevel.HEADING_2 }),
     projectsTable
@@ -445,48 +938,16 @@ export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
   const doc = new DOCX.Document({ sections: [{ children: [heading, summaryTable, new DOCX.Paragraph({ text: '' }), grid] }] });
   return DOCX.Packer.toBlob(doc);
 
-  // ---- helpers ----
   function row2(label: string, value: string): DOCX.TableRow {
     return new DOCX.TableRow({
       children: [
         new DOCX.TableCell({ width: { size: 30, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold(label)], margins: margins() }),
-        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value })] })], margins: margins() })
+        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: value || 'anpassen' })] })], margins: margins() })
       ]
     });
   }
   function paraBold(text: string) { return new DOCX.Paragraph({ children: [new DOCX.TextRun({ text, bold: true })] }); }
-  function paraMultiline(s: string) {
-    return s ? s.split('\n').map(line => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: line })] })) : [new DOCX.Paragraph({ text: '—' })];
-  }
-  function bullets(items: string[]) {
-    return items.map(s => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: s })], bullet: { level: 0 } }));
-  }
-  function paraIf(label: string, value?: string) {
-    if (!value) return [] as DOCX.Paragraph[];
-    return [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `${label}: `, bold: true }), new DOCX.TextRun({ text: value })] })];
-  }
   function margins() { return { left: 120, right: 120, top: 80, bottom: 80 }; }
-  function projectRow(p: ProjectItem): DOCX.TableRow {
-    const period = p?.period || [p?.from, p?.to].filter(Boolean).join(' – ') || '—';
-    const rightParas: DOCX.Paragraph[] = [];
-    if (p?.title) rightParas.push(paraBold(p.title));
-    rightParas.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Rolle: ${p?.rolle || ''}` })] }));
-    rightParas.push(new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: `Kunde/Branche: ${p?.kunde || ''}` })] }));
-    if (p?.taetigkeiten?.length) {
-      rightParas.push(paraBold('Tätigkeiten'));
-      rightParas.push(...p.taetigkeiten.map(t => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t })], bullet: { level: 0 } })));
-    }
-    if (p?.technologien?.length) {
-      rightParas.push(paraBold('Verwendete Technologien'));
-      rightParas.push(...p.technologien.map(t => new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: t })], bullet: { level: 0 } })));
-    }
-    return new DOCX.TableRow({
-      children: [
-        new DOCX.TableCell({ width: { size: 25, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ children: [new DOCX.TextRun({ text: period })] })], margins: margins() }),
-        new DOCX.TableCell({ width: { size: 75, type: DOCX.WidthType.PERCENTAGE }, children: rightParas.length ? rightParas : [new DOCX.Paragraph({ text: '—' })], margins: margins() })
-      ]
-    });
-  }
 }
 
 // ---------- Smart wrapper ----------
@@ -495,12 +956,28 @@ export async function tryGenerateDataportDoc(
   maybeTemplateUrlOrServerRel: string | null,
   data: ProfileData
 ): Promise<Blob> {
-  if (maybeTemplateUrlOrServerRel && await templateHasDocxtemplaterTags(spHttp, maybeTemplateUrlOrServerRel)) {
-    return fillDataportTemplate(spHttp, maybeTemplateUrlOrServerRel, data);
+  if (maybeTemplateUrlOrServerRel) {
+    try {
+      return await fillDataportTemplate(spHttp, maybeTemplateUrlOrServerRel, data);
+    } catch (err) {
+      console.warn('Falling back to generated Dataport layout because template rendering failed', err);
+    }
   }
   return buildDataportDocx(data);
 }
 
 export function defaultTemplateUrl(): string {
-  return `${BERATERPROFIL_SITE}/${LIB_INTERNAL_NAME}/Dataport CV Vorlage.docx`;
+  return `${BERATERPROFIL_SITE}/${LIB_INTERNAL_NAME}/Dataport CV Vorlage - TAGGED.docx`;
 }
+
+
+
+
+
+
+
+
+
+
+
+
