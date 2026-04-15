@@ -96,11 +96,7 @@ export async function fillDataportTemplate(
     console.error('Details:', err?.properties?.errors ?? err?.properties);
     throw err;
   }
-
-  // Ensure both generated tokens and literal "Bitte anpassen!" are yellow
-  highlightAndReplaceInZip(doc.getZip(), MISSING_TOKEN, 'Bitte anpassen!');
-  highlightLiteralInZip(doc.getZip(), 'Bitte anpassen!');
-
+  
   // Copy photo into the first embedded image in the body
   if (profile.photoBytes && profile.photoBytes.length) {
     try {
@@ -109,6 +105,8 @@ export async function fillDataportTemplate(
       console.warn('Photo copy failed (ignored):', e);
     }
   }
+  
+  finalHighlightBitteAnpassen(doc.getZip());
 
   return doc.getZip().generate({ type: 'blob' });
 }
@@ -189,61 +187,188 @@ function repairSplitTagsInTextRuns(xml: string): string {
   return output;
 }
 
-function highlightAndReplaceInZip(zip: any, token: string, replacement: string) {
+function finalHighlightBitteAnpassen(zip: any) {
+  const TOKEN = (MISSING_TOKEN || '').trim();
+  if (!TOKEN) return;
+
   const xmlParts = Object.keys(zip.files).filter(p =>
     /^word\/(document|header\d+|footer\d+)\.xml$/i.test(p)
   );
-  const tokenRe = new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'g');
 
   for (const part of xmlParts) {
-    const f = zip.file(part);
-    if (!f) continue;
+    const file = zip.file(part);
+    if (!file) continue;
 
-    let xml = f.asText();
-    if (xml.indexOf(token) < 0) continue;
+    let xml = file.asText();
 
-    xml = xml.replace(/<w:r[\s\S]*?<\/w:r>/g, (runXml: string) => {
-      if (runXml.indexOf(token) < 0) return runXml;
+    // Work per paragraph, but DO NOT rebuild the paragraph wrapper.
+    xml = xml.replace(/<w:p[\s\S]*?<\/w:p>/g, (pXml: string) => {
+      const runRe = /<w:r[\s\S]*?<\/w:r>/g;
 
-      let updated = runXml.replace(tokenRe, replacement);
-      if (/<w:highlight\b/i.test(updated)) return updated;
+      // Collect runs with positions
+      const runs: Array<{ start: number; end: number; xml: string; text: string }> = [];
+      let m: RegExpExecArray | null;
 
-      if (/<w:rPr[\s>]/i.test(updated)) {
-        return updated.replace(/<w:rPr[^>]*>/i, (m0: string) => `${m0}<w:highlight w:val="yellow"/>`);
+      while ((m = runRe.exec(pXml)) !== null) {
+        const rXml = m[0];
+        const start = m.index;
+        const end = start + rXml.length;
+
+        const texts = [...rXml.matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g)].map(x => x[1] ?? '');
+        const text = texts.join('');
+        runs.push({ start, end, xml: rXml, text });
       }
-      return updated.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) =>
-        `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`
-      );
+
+      if (!runs.length) return pXml;
+
+      const paragraphText = runs.map(r => r.text).join('');
+      if (!paragraphText.includes(TOKEN)) {
+        // Might still be split — but if it's not even in the joined paragraph text, skip
+        return pXml;
+      }
+
+      // Find all occurrences in paragraphText
+      const occurrences: Array<{ start: number; end: number }> = [];
+      let from = 0;
+      while (true) {
+        const idx = paragraphText.indexOf(TOKEN, from);
+        if (idx < 0) break;
+        occurrences.push({ start: idx, end: idx + TOKEN.length });
+        from = idx + 1;
+      }
+      if (!occurrences.length) return pXml;
+
+      // Rebuild the paragraph by slicing around each run (preserves non-run nodes!)
+      let out = '';
+      let cursor = 0;
+
+      // Track where each run starts in the paragraphText (global offsets)
+      let globalPos = 0;
+
+      for (const r of runs) {
+        out += pXml.slice(cursor, r.start);
+
+        const rStart = globalPos;
+        const rEnd = globalPos + r.text.length;
+
+        // Runs with no text -> keep as-is
+        if (!r.text.length) {
+          out += r.xml;
+          cursor = r.end;
+          globalPos = rEnd;
+          continue;
+        }
+
+        // Determine highlight segments for THIS run based on overlaps
+        // We'll split this run's text into chunks and clone the run for each chunk.
+        const segments: Array<{ text: string; highlight: boolean }> = [];
+
+        let localFrom = 0;
+        let localGlobal = rStart;
+
+        // Compute all overlaps with occurrences
+        const overlaps: Array<{ a: number; b: number }> = [];
+        for (const occ of occurrences) {
+          if (occ.end <= rStart || occ.start >= rEnd) continue;
+          overlaps.push({
+            a: Math.max(occ.start, rStart),
+            b: Math.min(occ.end, rEnd)
+          });
+        }
+
+        // No overlap -> keep run unchanged
+        if (!overlaps.length) {
+          out += r.xml;
+          cursor = r.end;
+          globalPos = rEnd;
+          continue;
+        }
+
+        // Sort overlaps and build segments
+        overlaps.sort((x, y) => x.a - y.a);
+
+        for (const ov of overlaps) {
+          const beforeLen = ov.a - localGlobal;
+          const matchLen = ov.b - ov.a;
+
+          if (beforeLen > 0) {
+            segments.push({ text: r.text.slice(localFrom, localFrom + beforeLen), highlight: false });
+            localFrom += beforeLen;
+            localGlobal += beforeLen;
+          }
+
+          if (matchLen > 0) {
+            segments.push({ text: r.text.slice(localFrom, localFrom + matchLen), highlight: true });
+            localFrom += matchLen;
+            localGlobal += matchLen;
+          }
+        }
+
+        // Tail
+        if (localFrom < r.text.length) {
+          segments.push({ text: r.text.slice(localFrom), highlight: false });
+        }
+
+        // Emit cloned runs for segments
+        for (const seg of segments) {
+          out += cloneRunWithTextSafe(r.xml, seg.text, seg.highlight);
+        }
+
+        cursor = r.end;
+        globalPos = rEnd;
+      }
+
+      out += pXml.slice(cursor);
+      return out;
     });
 
     zip.file(part, xml);
   }
 }
 
-function highlightLiteralInZip(zip: any, word: string) {
-  const xmlParts = Object.keys(zip.files).filter(p =>
-    /^word\/(document|header\d+|footer\d+)\.xml$/i.test(p)
-  );
+function cloneRunWithTextSafe(originalRunXml: string, newText: string, highlight: boolean): string {
+  // Only touch "plain text runs" (same idea as you had)
+  const isPureTextRun =
+    /<w:t[\s>]/i.test(originalRunXml) &&
+    !/<w:numPr|<w:fldChar|<w:instrText|<w:sym|<w:object|<w:drawing/i.test(originalRunXml);
 
-  for (const part of xmlParts) {
-    const f = zip.file(part);
-    if (!f) continue;
+  if (!isPureTextRun) return originalRunXml;
 
-    let xml = f.asText();
-    if (xml.toLowerCase().indexOf(word.toLowerCase()) < 0) continue;
+  let runXml = originalRunXml;
 
-    xml = xml.replace(/<w:r[\s\S]*?<\/w:r>/g, (runXml: string) => {
-      if (runXml.toLowerCase().indexOf(word.toLowerCase()) < 0) return runXml;
-      if (/<w:highlight\b/i.test(runXml)) return runXml;
+  // Remove all existing w:t nodes
+  runXml = runXml.replace(/<w:t[^>]*>[\s\S]*?<\/w:t>/gi, '');
 
-      if (/<w:rPr[\s>]/i.test(runXml)) {
-        return runXml.replace(/<w:rPr[^>]*>/i, (m0: string) => `${m0}<w:highlight w:val="yellow"/>`);
-      }
-      return runXml.replace(/<w:r([^>]*)>/i, (_m0: string, attrs: string) =>
-        `<w:r${attrs}><w:rPr><w:highlight w:val="yellow"/></w:rPr>`
-      );
-    });
-
-    zip.file(part, xml);
+  // Ensure rPr exists
+  if (!/<w:rPr[\s>]/i.test(runXml)) {
+    runXml = runXml.replace(/<w:r([^>]*)>/i, `<w:r$1><w:rPr></w:rPr>`);
   }
+
+  // Remove existing highlight tags (both self-closing and expanded forms)
+  runXml = runXml.replace(/<w:highlight\b[^>]*\/>/gi, '');
+  runXml = runXml.replace(/<w:highlight\b[^>]*>[\s\S]*?<\/w:highlight>/gi, '');
+
+  const normalizedText = (newText ?? '').replace(/\u00A0/g, ' ');
+  const escaped = escapeXml(normalizedText);
+
+  // Keep preserve if original had it
+  const hasPreserve = /<w:t[^>]*xml:space="preserve"/i.test(originalRunXml) || /^\s|\s$/.test(normalizedText);
+  const tOpen = hasPreserve ? `<w:t xml:space="preserve">` : `<w:t>`;
+
+  // Add highlight if requested
+  if (highlight) {
+    runXml = runXml.replace(/<w:rPr[^>]*>/i, m => `${m}<w:highlight w:val="yellow"/>`);
+  }
+
+  // Insert the new w:t before the FIRST closing </w:r> (robust vs whitespace)
+  runXml = runXml.replace(/<\/w:r\s*>/i, `${tOpen}${escaped}</w:t></w:r>`);
+
+  return runXml;
+}
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }

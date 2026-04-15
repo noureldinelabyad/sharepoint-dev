@@ -1,5 +1,6 @@
 import * as DOCX from 'docx';
 import { ProfileData } from '../types';
+import { MISSING_TOKEN } from '../../constants';
 
 export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
   const heading = new DOCX.Paragraph({
@@ -25,7 +26,7 @@ export async function buildDataportDocx(data: ProfileData): Promise<Blob> {
     return new DOCX.TableRow({
       children: [
         new DOCX.TableCell({ width: { size: 30, type: DOCX.WidthType.PERCENTAGE }, children: [paraBold(label)] }),
-        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ text: value || 'Bitte anpassen!' })] })
+        new DOCX.TableCell({ width: { size: 70, type: DOCX.WidthType.PERCENTAGE }, children: [new DOCX.Paragraph({ text: value || MISSING_TOKEN })] })
       ]
     });
   }
