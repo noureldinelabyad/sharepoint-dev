@@ -97,12 +97,14 @@ export const HeroMeCard: React.FC<Props> = ({ me, onOpenSkills, spHttpClient, ab
 
         <div style={{ width: '100%', margin: '2px', gap: '8px', display: 'flex', justifyContent: 'center' }}>
           {/* Actions: open folder + generate CV (download) */}
-          <GenerateCv
-            spHttpClient={spHttpClient}
-            absWebUrl={absWebUrl}
-            serverRelWebUrl={serverRelWebUrl}
-            displayName={displayName}
-          />
+          {isPrivileged && (
+            <GenerateCv
+              spHttpClient={spHttpClient}
+              absWebUrl={absWebUrl}
+              serverRelWebUrl={serverRelWebUrl}
+              displayName={displayName}
+            />
+          )}
 
           {/* Always visible for the current user */}
           <a

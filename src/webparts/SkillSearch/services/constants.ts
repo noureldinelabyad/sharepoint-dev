@@ -10,7 +10,7 @@ const SERVICE_LIKE_DENY_SRC = '(thinformatics |svc|service|automation|bot|daemon
 export const SERVICE_LIKE_DENY = new RegExp(SERVICE_LIKE_DENY_SRC, 'i');
 
 /** Roll Based Access accounts by jobtitle. */
-export const RBA_ALLOW_SRC = 'head\\s*of|hr|sales|ceo|trainee';
+export const RBA_ALLOW_SRC = 'head\\s*of|hr|sales|ceo';
 export const RBA_ALLOW = new RegExp(`\\b(?:${RBA_ALLOW_SRC})\\b`, 'i');
 
 /** Keep only users whose email/UPN ends with this domain. */

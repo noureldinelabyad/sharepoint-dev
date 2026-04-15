@@ -136,16 +136,7 @@ export const PersonCard: React.FC<Props> = ({
           </a>
         )}
 
-        <a className={styles.linkBtn} href={outlookUrl(person)} target="_blank" rel="noopener noreferrer">
-          <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_Outlook_(2018%E2%80%93present).svg.png?csf=1&web=1&e=AVZl0q" alt="" className={styles.logo} />
-          Termin
-        </a>
-        <a className={styles.linkBtn} href={teamsUrl(person)} target="_blank" rel="noopener noreferrer">
-          <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_Teams_(2018%E2%80%93present).svg.png?csf=1&web=1&e=bABdsE" alt="" className={styles.logo} />
-          Chat
-        </a>
-
-        {/* Generate CV button (unchanged) */}
+        {/* Generate CV button */}
         {showFolderBtn && (
           <GenerateCv
             spHttpClient={spHttpClient}
@@ -154,6 +145,16 @@ export const PersonCard: React.FC<Props> = ({
             displayName={person.displayName}
           />
         )}
+
+        <a className={styles.linkBtn} href={outlookUrl(person)} target="_blank" rel="noopener noreferrer">
+          <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_Outlook_(2018%E2%80%93present).svg.png?csf=1&web=1&e=AVZl0q" alt="" className={styles.logo} />
+          Termin
+        </a>
+        <a className={styles.linkBtn} href={teamsUrl(person)} target="_blank" rel="noopener noreferrer">
+          <img src="https://thinformatics.sharepoint.com/:i:/r/sites/thinformationHub/SiteAssets/SitePages/Skill-Search/32px-Microsoft_Office_Teams_(2018%E2%80%93present).svg.png?csf=1&web=1&e=bABdsE" alt="" className={styles.logo} />
+          Chat
+        </a>
+        
       </div>
 
       <div className={styles.cardSkills}>

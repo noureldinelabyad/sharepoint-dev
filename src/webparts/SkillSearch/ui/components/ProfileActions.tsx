@@ -19,7 +19,7 @@ type Props = {
   spHttpClient: SPHttpClient;
   absWebUrl: string;           // context.pageContext.web.absoluteUrl
   serverRelWebUrl: string;     // context.pageContext.web.serverRelativeUrl
-  displayName: string;         // e.g. "Noureldin Elabyad"
+  displayName: string;         
 };
 
 export const GenerateCv: React.FC<Props> = ({
