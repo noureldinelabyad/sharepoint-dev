@@ -36,8 +36,8 @@ export default function SkillSearch({ context }: SkillSearchProps) {
     [base, tokens]
   );
   const filtered = React.useMemo(
-    () => applyFilters(matchedText, filters),
-    [matchedText, filters]
+    () => applyFilters(matchedText, filters, tokens),
+    [matchedText, filters, tokens]
   );
 
   const deptsForUI = React.useMemo(

@@ -13,18 +13,18 @@ const RULES: Rule[] = [
 const TRAILING_EXPERT = /[\s:\-–—]\s*expert\b/i;
 const TRAILING_ADV    = /[\s:\-–—]\s*(advanced|fortgeschritten)\b/i;
 
-function rankFromText(t?: string): number {
-  if (!t) return 2;
+function rankFromText(t?: string): number | undefined {
+  if (!t) return undefined;
   if (TRAILING_EXPERT.test(t)) return 5;
   if (TRAILING_ADV.test(t)) return 4;
   for (const r of RULES) if (r.rx.test(t)) return r.rank;
-  return 2; // neutral / unknown
+  return undefined;
 }
 
 /** Sorting still uses the best rank we can infer from proficiency or name. */
 export function rankForSkill(s: Skill): number {
   const p = rankFromText(s.proficiency);
-  return p !== 2 ? p : rankFromText(s.displayName);
+  return p ?? rankFromText(s.displayName) ?? 0;
 }
 
 export function sortSkillsByLevel(skills: Skill[]): Skill[] {
@@ -42,7 +42,7 @@ export function sortSkillsByLevel(skills: Skill[]): Skill[] {
  */
 export function effectiveProficiency(s: Skill): string | undefined {
   // If the name already contains "Expert/Advanced/…", don't add anything.
-  if (rankFromText(s.displayName) !== 2) return undefined;
+  if (rankFromText(s.displayName) !== undefined) return undefined;
 
   // Otherwise show the normalized proficiency (when Graph provides it).
   const pRank = rankFromText(s.proficiency);

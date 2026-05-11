@@ -27,17 +27,17 @@ const TRAILING_ADV    = /[\s:\-–—]\s*(advanced|fortgeschritten)\b/i;
 const norm = (s?: string) =>
   (s || "").toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
 
-function rankFromText(t?: string): number {
-  if (!t) return 2;
+function rankFromText(t?: string): number | undefined {
+  if (!t) return undefined;
   if (TRAILING_EXPERT.test(t)) return 5;
   if (TRAILING_ADV.test(t))    return 4;
   for (const r of RULES) if (r.rx.test(t)) return r.rank;
-  return 2;
+  return undefined;
 }
 
-function rankForSkill(s: Skill): number {
+function rankForSkill(s: Skill): number | undefined {
   const p = rankFromText(s.proficiency);
-  return p !== 2 ? p : rankFromText(s.displayName);
+  return p ?? rankFromText(s.displayName);
 }
 
 const labelForRank = (r: number): SkillLevel =>
@@ -47,12 +47,31 @@ const labelForRank = (r: number): SkillLevel =>
   r === 2 ? "Foundation" : "Beginner";
 
 // ---------- public helpers ----------
-/** true if a person has any skill in one of the selected levels */
-export function personMatchesLevels(p: Person, selected: Set<SkillLevel>): boolean {
+function skillMatchesTokens(s: Skill, tokens: string[]): boolean {
+  if (!tokens.length) return false;
+  const name = norm(s.displayName);
+  const words = name.split(/[^a-z0-9]+/).filter(Boolean);
+  return tokens.some(t => words.some(w => w === norm(t)));
+}
+
+function skillContainsTokens(s: Skill, tokens: string[]): boolean {
+  if (!tokens.length) return false;
+  const name = norm(s.displayName);
+  return tokens.some(t => name.includes(norm(t)));
+}
+
+/** true if a person has a relevant skill in one of the selected levels */
+export function personMatchesLevels(p: Person, selected: Set<SkillLevel>, tokens: string[] = []): boolean {
   if (!selected.size) return true; // no level filter -> allow
-  for (const s of (p.skills || [])) {
-    const lvl = labelForRank(rankForSkill(s));
-    if (selected.has(lvl)) return true;
+  const skills = p.skills || [];
+  const hasSkillSearchMatch = tokens.length > 0 && skills.some(s => skillContainsTokens(s, tokens));
+  const candidates = hasSkillSearchMatch
+    ? skills.filter(s => skillMatchesTokens(s, tokens))
+    : skills;
+
+  for (const s of candidates) {
+    const rank = rankForSkill(s);
+    if (rank !== undefined && selected.has(labelForRank(rank))) return true;
   }
   return false;
 }
@@ -65,9 +84,9 @@ export function personMatchesDepartments(p: Person, selected: Set<string>): bool
 }
 
 /** Apply both filters */
-export function applyFilters(people: Person[], state: FilterState): Person[] {
+export function applyFilters(people: Person[], state: FilterState, tokens: string[] = []): Person[] {
   return people.filter(p => personMatchesDepartments(p, state.depts) &&
-                            personMatchesLevels(p, state.levels));
+                            personMatchesLevels(p, state.levels, tokens));
 }
 
 /** Build a unique, display-ready department list for the UI. */
